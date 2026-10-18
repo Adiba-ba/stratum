@@ -38,7 +38,7 @@ from stratum.model.features import FEATURE_NAMES
 from stratum.physics import e_i
 
 # The netCDF4 wheel can emit a spurious NumPy binary-compatibility
-# RuntimeWarning on first engine use (see scripts/run_flight_corridor.py).
+# RuntimeWarning on first engine use (see src/stratum/pipeline/runner.py).
 pytestmark = pytest.mark.filterwarnings(
     "ignore:numpy.ndarray size changed.*:RuntimeWarning"
 )

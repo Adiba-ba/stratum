@@ -1,6 +1,6 @@
 """Standalone monochrome HTML corridor report for Project STRATUM.
 
-Ported from ``scripts/generate_friend_report.py`` with two corrections:
+The renderer applies two corrections over the original narrative report:
 
 - the recommended direction is read from the decision data, never
   assumed: a waypoint row shows ``CLIMB -> FLx`` when the recommended

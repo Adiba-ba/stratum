@@ -1,11 +1,11 @@
 """Live weather check subcommand for the STRATUM command line.
 
-Ports ``scripts/predict_my_flight.py``: samples the Open-Meteo hourly
-pressure-level forecast along the built-in RJAA (Narita) to RJBB (Kansai)
-track, converts water relative humidity to ice relative humidity, and runs
-the exact Schmidt-Appleman criterion at FL260 for each waypoint. This is a
-real forecast query, but it is a single-hour diagnostic, not a validated
-prediction of the operational product.
+Samples the Open-Meteo hourly pressure-level forecast along the built-in
+RJAA (Narita) to RJBB (Kansai) track, converts water relative humidity to
+ice relative humidity, and runs the exact Schmidt-Appleman criterion at
+FL260 for each waypoint. This is a real forecast query, but it is a
+single-hour diagnostic, not a validated prediction of the operational
+product.
 """
 
 from __future__ import annotations
