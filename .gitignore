@@ -1,3 +1,9 @@
+# Generated artefacts and caches
+models/
+*.joblib
+*.pkl
+data/cache/
+
 # Virtual environments
 .venv/
 venv/
@@ -5,6 +11,9 @@ venv/
 # Python caches
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
 .pytest_cache/
 
 # macOS
