@@ -359,6 +359,10 @@ def screen_routes(argv: list[str]) -> int:
 
     lines: list[str] = []
     p_340 = thermo.fl_to_p(SCREEN_FL)
+    lines.append(
+        "Synthetic scenario screening - not real data; every row uses "
+        "fixed, invented temperature and RHi knots."
+    )
     lines.append("Project STRATUM - Indian corridor contrail screening")
     lines.append(
         f"FL{SCREEN_FL:.0f} ({p_340:.1f} hPa ISA), {SCREEN_NUM_POINTS} "

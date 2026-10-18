@@ -454,7 +454,7 @@ def test_viewing_zenith_angle_known_geometry() -> None:
     assert viewing_zenith_angle_deg(0.0, 45.5, 45.5) == 0.0
     assert viewing_zenith_angle_deg(
         28.5, 77.0, 45.5
-    ) == pytest.approx(6.439013789279628, rel=1e-9)
+    ) == pytest.approx(47.90795804503825, rel=1e-9)
     # Beyond the geostationary limb there is no line of sight.
     assert math.isnan(viewing_zenith_angle_deg(0.0, 130.0, 45.5))
     assert math.isnan(viewing_zenith_angle_deg(float("nan"), 77.0, 45.5))

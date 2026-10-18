@@ -170,18 +170,16 @@ def viewing_zenith_angle_deg(
 
     The angular distance ``s`` between the target and the sub-satellite
     point follows from the spherical law of cosines; the viewing zenith
-    angle is then approximated with the documented geostationary form
+    angle is then the exact geostationary geometry
 
-    ``VZA = atan2(r * sin(s), h_geo + r - r * cos(s))``
+    ``VZA = atan2((r + h) sin(s), (r + h) cos(s) - r)``
 
     with ``r = EARTH_RADIUS_KM`` (6371 km) and
-    ``h_geo = GEOSTATIONARY_ALTITUDE_KM`` (35786 km). The expression is the
-    module's documented small-argument approximation of the exact
-    on-disk geometry ``atan2((r + h) sin s, (r + h) cos s - r)``; both
-    forms are small and monotone near the sub-satellite point and are
-    used here to drive the observability gate, not to do navigation. A
-    target beyond the geostationary limb (``s >= acos(r / (r + h))``) has
-    no line of sight and returns ``nan``.
+    ``h_geo = GEOSTATIONARY_ALTITUDE_KM`` (35786 km). The expression is
+    the on-disk geometry of a spherical Earth, used to drive the
+    observability gate, not to do navigation. A target beyond the
+    geostationary limb (``s >= acos(r / (r + h))``) has no line of sight
+    and returns ``nan``.
 
     Parameters
     ----------
@@ -213,7 +211,9 @@ def viewing_zenith_angle_deg(
         return math.nan
     r = EARTH_RADIUS_KM
     h = GEOSTATIONARY_ALTITUDE_KM
-    return math.degrees(math.atan2(r * math.sin(s), h + r - r * math.cos(s)))
+    return math.degrees(
+        math.atan2((r + h) * math.sin(s), (r + h) * math.cos(s) - r)
+    )
 
 
 def _coerce_utc(when: Any) -> pd.Timestamp:
