@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stratum"
+version = "0.1.0"
+description = "Physics-grounded contrail persistence prediction and altitude-dispatch evaluation"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "xarray>=2023.1",
+    "netCDF4>=1.6",
+    "scikit-learn>=1.3",
+    "lightgbm>=4.0",
+    "joblib>=1.3",
+]
+
+[project.optional-dependencies]
+data = [
+    "cdsapi>=0.7",
+]
+figures = [
+    "matplotlib>=3.8",
+]
+dev = [
+    "pytest>=8.0",
+]
+geo = [
+    "pyproj>=3.5",
+]
+
+[project.scripts]
+stratum = "stratum.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.setuptools.package-data]
+stratum = ["py.typed"]
