@@ -27,6 +27,7 @@ from stratum.physics.diagnostics import (
 from stratum.pipeline import (
     HUMIDITY_OFFSET_HPA,
     evaluate_corridor_flight,
+    extract_features_for_point,
     extract_features_for_trajectory,
     pressure_to_altitude_m,
     specific_humidity_to_rhi,
@@ -63,15 +64,29 @@ _RHI_CENTRE = 0.85
 _MARGIN_CENTRE = -4.0
 
 
-def _mock_met(target_rhi: float, temperature_offset: float = 0.0) -> xr.Dataset:
+def _mock_met(
+    target_rhi: float,
+    temperature_offset: float = 0.0,
+    levels: np.ndarray | None = None,
+) -> xr.Dataset:
     """Build an in-memory ERA5-like dataset with controlled mid-level RHi.
 
     Temperature is linear in pressure level (so interpolation is exact);
     specific humidity is prescribed from the ice saturation curve so that
     the vapor pressure corresponds to ``target_rhi`` at each grid level.
+    ``levels`` overrides the default pressure axis, e.g. to place the
+    topmost stored level just below a queried point.
     """
-    shape = (MOCK_LEVELS.size, MOCK_LATS.size, MOCK_LONS.size, MOCK_TIMES.size)
-    level = MOCK_LEVELS[:, None, None, None]
+    pressure_levels = (
+        MOCK_LEVELS if levels is None else np.asarray(levels, dtype=float)
+    )
+    shape = (
+        pressure_levels.size,
+        MOCK_LATS.size,
+        MOCK_LONS.size,
+        MOCK_TIMES.size,
+    )
+    level = pressure_levels[:, None, None, None]
     lat = MOCK_LATS[None, :, None, None]
     lon = MOCK_LONS[None, None, :, None]
     time_index = np.arange(MOCK_TIMES.size, dtype=float)[None, None, None, :] * 0.0
@@ -82,7 +97,7 @@ def _mock_met(target_rhi: float, temperature_offset: float = 0.0) -> xr.Dataset:
     saturation = np.array(
         [
             e_i(216.65 + 0.11 * (value - 200.0) + temperature_offset)
-            for value in MOCK_LEVELS
+            for value in pressure_levels
         ]
     )[:, None, None, None]
     specific_humidity = target_rhi * saturation * 0.622 / (level * 100.0)
@@ -118,7 +133,7 @@ def _mock_met(target_rhi: float, temperature_offset: float = 0.0) -> xr.Dataset:
             ),
         },
         coords={
-            "level": MOCK_LEVELS,
+            "level": pressure_levels,
             "latitude": MOCK_LATS,
             "longitude": MOCK_LONS,
             "time": MOCK_TIMES,
@@ -188,6 +203,17 @@ def _contiguous_flag_runs(segments: list[dict]) -> int:
             runs += 1
         previous_flagged = flagged
     return runs
+
+
+class _FixedProbabilityModel:
+    """CalibratedModel stand-in returning a constant persistence probability."""
+
+    def __init__(self, probability: float) -> None:
+        self._probability = float(probability)
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probability = np.full(len(features), self._probability, dtype=float)
+        return np.column_stack([1.0 - probability, probability])
 
 
 def test_pressure_to_altitude_inverts_isa() -> None:
@@ -399,4 +425,159 @@ def test_runner_dry_corridor_produces_no_advisories() -> None:
     assert result["flagged_segments"] == 0
     assert result["recommended_reroutes"] == []
     assert result["total_avoidable_warming_j"] == 0.0
+    assert all(segment["decision_status"] is None for segment in result["segments"])
+
+
+def _trajectory_with_out_of_domain_dip(
+    outside: list[int],
+) -> pd.DataFrame:
+    """Return the cruise trajectory with a southern dip outside ERA5_BBOX."""
+    trajectory = _trajectory()
+    for index in outside:
+        # 10 deg N is inside the ADS-B bounds (6-37 N) but south of ERA5.
+        trajectory.loc[index, "lat"] = 10.0
+    return trajectory
+
+
+def test_extract_features_marks_out_of_domain_rows() -> None:
+    outside = [4, 5, 6]
+    features, metadata = extract_features_for_trajectory(
+        _trajectory_with_out_of_domain_dip(outside), _mock_met(target_rhi=1.3)
+    )
+
+    assert features.shape == (_NUM_POINTS, len(FEATURE_NAMES))
+    assert len(metadata) == _NUM_POINTS
+    for index in outside:
+        assert metadata[index]["data_available"] is False
+        assert metadata[index]["unavailable_reason"] == "out_of_domain"
+        # The row is kept in place with nan values, schema unchanged.
+        assert np.all(np.isnan(features[index]))
+    for index in range(_NUM_POINTS):
+        if index not in outside:
+            assert metadata[index]["data_available"] is True
+            assert metadata[index]["unavailable_reason"] is None
+
+
+def test_extract_features_marks_missing_met_rows() -> None:
+    dataset = _mock_met(target_rhi=1.3)
+    dataset["vertical_velocity"] = xr.full_like(
+        dataset["vertical_velocity"], float("nan")
+    )
+    features, metadata = extract_features_for_trajectory(_trajectory(), dataset)
+
+    assert all(info["data_available"] is False for info in metadata)
+    assert all(info["unavailable_reason"] == "missing_met" for info in metadata)
+    assert np.all(np.isnan(features))
+
+
+def test_extract_features_fl370_keeps_row_with_nan_upper_probe() -> None:
+    """A point inside the file keeps its row when the upper probe leaves it.
+
+    The bundled real ERA5 file tops out at 200 hPa, so at FL370 (~217 hPa)
+    the ``-25 hPa`` probe lands at ~192 hPa and is undefined. Only the
+    point sample gates ``data_available``; the probe-derived features must
+    be NaN instead of an invented value, while the point-derived features
+    (RHi, SAC) stay usable.
+    """
+    features, metadata = extract_features_for_trajectory(
+        _trajectory(fl=370.0), _mock_met(target_rhi=1.3)
+    )
+    assert features.shape == (_NUM_POINTS, len(FEATURE_NAMES))
+    assert all(info["data_available"] is True for info in metadata)
+    assert all(info["unavailable_reason"] is None for info in metadata)
+
+    for name in (
+        "rhi_above",
+        "rhi_grad",
+        "vertical_wind_shear",
+        "richardson_number",
+    ):
+        column = features[:, FEATURE_NAMES.index(name)]
+        assert np.all(np.isnan(column)), name
+    # The lower probe is still inside the file, so only the upper one is
+    # undefined at FL370; rhi (the point sample) stays finite.
+    assert np.all(np.isfinite(features[:, FEATURE_NAMES.index("rhi_below")]))
+    assert np.all(np.isfinite(features[:, FEATURE_NAMES.index("rhi")]))
+    # The SAC was evaluated on the point sample, not skipped.
+    assert np.all(np.isfinite(features[:, FEATURE_NAMES.index("tlc_k")]))
+    assert all(isinstance(info["sac_forms"], bool) for info in metadata)
+
+
+def test_extract_features_keeps_row_when_probes_leave_range() -> None:
+    """Both bounding-layer samples can leave the file; the row still stands."""
+    dataset = _mock_met(target_rhi=1.3, levels=np.array([250.0, 280.0]))
+    pressure_pa = 27000.0  # 270 hPa; the probes at 245/295 hPa are outside
+    vector, info = extract_features_for_point(
+        28.5, 77.0, pressure_pa, "2025-01-01T01:00", ds_met=dataset
+    )
+
+    assert info["data_available"] is True
+    assert info["unavailable_reason"] is None
+    assert math.isfinite(info["rhi"])
+    assert math.isfinite(vector[FEATURE_NAMES.index("rhi")])
+    for name in (
+        "rhi_above",
+        "rhi_below",
+        "rhi_grad",
+        "vertical_wind_shear",
+        "richardson_number",
+    ):
+        assert math.isnan(vector[FEATURE_NAMES.index(name)]), name
+    # The SAC still runs on the point sample.
+    assert math.isfinite(info["tlc_k"])
+    assert isinstance(info["sac_forms"], bool)
+
+
+def test_runner_skips_out_of_domain_segments() -> None:
+    outside = list(range(8, 13))
+    # A constant high probability would flag every segment if the guard
+    # were absent, so the counts below pin the skip behaviour.
+    result = evaluate_corridor_flight(
+        _trajectory_with_out_of_domain_dip(outside),
+        _mock_met(target_rhi=1.3),
+        _FixedProbabilityModel(0.9),
+    )
+
+    assert result["total_segments"] == _NUM_POINTS
+    assert result["out_of_domain_segments"] == len(outside)
+    assert result["contrail_persistent_segments"] == _NUM_POINTS - len(outside)
+    assert result["flagged_segments"] == _NUM_POINTS - len(outside)
+
+    for segment in result["segments"]:
+        if segment["segment_index"] in outside:
+            assert segment["status"] == "out_of_domain"
+            assert segment["decision_status"] is None
+            assert segment["recommended_fl"] is None
+            assert segment["delta_fuel_kg"] is None
+            assert segment["delta_co2_kg"] is None
+            assert segment["avoided_contrail_ef_j"] is None
+        else:
+            assert segment["status"] == "ok"
+            assert segment["decision_status"] is not None
+
+    # No advisory covers an out-of-domain segment, and the data gap
+    # splits the flagged run into two events of at most 20 segments.
+    for reroute in result["recommended_reroutes"]:
+        assert reroute["segment_index"] not in outside
+        assert reroute["segments_in_event"] <= _NUM_POINTS - len(outside)
+
+    total = sum(
+        entry["avoided_contrail_ef_j"] for entry in result["recommended_reroutes"]
+    )
+    assert result["total_avoidable_warming_j"] == pytest.approx(total, rel=1e-12)
+
+
+def test_runner_reports_missing_met_segments_without_advisories() -> None:
+    dataset = _mock_met(target_rhi=1.3)
+    dataset["fraction_of_cloud_cover"] = xr.full_like(
+        dataset["fraction_of_cloud_cover"], float("nan")
+    )
+    result = evaluate_corridor_flight(
+        _trajectory(), dataset, _FixedProbabilityModel(0.9)
+    )
+
+    assert result["flagged_segments"] == 0
+    assert result["contrail_persistent_segments"] == 0
+    assert result["recommended_reroutes"] == []
+    assert all(segment["status"] == "missing_met" for segment in result["segments"])
     assert all(segment["decision_status"] is None for segment in result["segments"])

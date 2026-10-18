@@ -20,10 +20,17 @@ __all__ = [
 #: (Section 14.4).
 CO2_PER_KG_FUEL: float = 3.16
 
-#: Nominal cruise fuel burn [kg/s] per supported aircraft type.
+#: Nominal cruise fuel burn [kg/s] per supported aircraft type. These are
+#: nominal engineering defaults, not operator data; ``"B737"`` is kept as an
+#: alias of the A320/737-800 class burn.
 AIRCRAFT_CRUISE_BURN_KG_S: dict[str, float] = {
     "A320": 0.65,
+    "A20N": 0.58,
     "B737": 0.65,
+    "B738": 0.65,
+    "B38M": 0.60,
+    "B77W": 2.44,
+    "DEFAULT": 0.65,
 }
 
 #: Midpoints [%] of the Section 14.4 penalty ranges, per 2,000 ft change.
@@ -52,7 +59,9 @@ def estimate_fuel_penalty(
     Parameters
     ----------
     aircraft_type : str
-        Supported types: ``"A320"``, ``"B737"`` (case-insensitive).
+        Aircraft type key of :data:`AIRCRAFT_CRUISE_BURN_KG_S`, e.g.
+        ``"A320"``, ``"A20N"``, ``"B737"``, ``"B738"``, ``"B38M"``,
+        ``"B77W"``, ``"DEFAULT"`` (case-insensitive).
     baseline_fl : float
         Current flight level, in hundreds of feet.
     target_fl : float

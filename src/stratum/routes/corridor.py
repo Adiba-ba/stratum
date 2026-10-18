@@ -39,6 +39,10 @@ _KELVIN_OFFSET: float = 273.15
 _HPA_PER_PA: float = 100.0
 _RHI_MAX: float = 2.0
 
+#: Minimum ``sin(omega)`` for a well-conditioned slerp. Below this the
+#: endpoints are near-antipodal and the interpolation is undefined.
+_SIN_OMEGA_EPS: float = 1e-12
+
 
 class Waypoint(TypedDict):
     """A single corridor waypoint.
@@ -191,6 +195,13 @@ def great_circle_waypoints(
 
     dot = min(1.0, max(-1.0, sum(a * b for a, b in zip(v1, v2))))
     omega = math.acos(dot)
+    sin_omega = math.sin(omega)
+    if omega >= 1e-12 and sin_omega < _SIN_OMEGA_EPS:
+        raise ValueError(
+            "great_circle_waypoints: near-antipodal inputs, "
+            f"sin(omega)={sin_omega:.3e} < {_SIN_OMEGA_EPS:g} "
+            f"for {coord1} -> {coord2}"
+        )
     p_pa = thermo.fl_to_p(fl) * _HPA_PER_PA
 
     waypoints: list[Waypoint] = []
@@ -206,7 +217,7 @@ def great_circle_waypoints(
                 y = (1.0 - t) * v1[1] + t * v2[1]
                 z = (1.0 - t) * v1[2] + t * v2[2]
             else:
-                scale = math.sin(omega)
+                scale = sin_omega
                 a = math.sin((1.0 - t) * omega) / scale
                 b = math.sin(t * omega) / scale
                 x = a * v1[0] + b * v2[0]

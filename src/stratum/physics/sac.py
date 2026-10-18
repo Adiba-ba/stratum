@@ -140,6 +140,12 @@ def critical_T(rhw: float, TLM: float, G: float) -> float:
     T_LC. For ``rhw >= 0.999`` the mixing line is tangent to the
     saturation curve at T_LM itself, so T_LM is returned (Schumann 1996,
     p. 10).
+
+    Raises
+    ------
+    ValueError
+        If ``rhw`` is not positive, or if the root bracket fails because
+        ``TLM`` and ``G`` are inconsistent.
     """
     if rhw <= 0.0:
         raise ValueError(f"rhw must be positive, got {rhw!r}")
@@ -152,10 +158,14 @@ def critical_T(rhw: float, TLM: float, G: float) -> float:
         return rhw * thermo.e_w(t) - e_w_tlm - G * (t - TLM)
 
     # residual > 0 at the cold bound and < 0 at T_LM; the root between the
-    # two is the relevant (cold) crossing.
+    # two is the relevant (cold) crossing.  A failing bracket means TLM and
+    # G are inconsistent, so raise instead of returning a bogus T_LC.
     lo, hi = _TLC_COLD_BOUND_K, TLM
     if residual(lo) <= 0.0 or residual(hi) >= 0.0:
-        return TLM
+        raise ValueError(
+            "critical_T: bracket failed, no root on "
+            f"[{lo:g}, {hi:g}] for rhw={rhw!r}, TLM={TLM!r}, G={G!r}"
+        )
     for _ in range(_BISECTION_ITERATIONS):
         mid = 0.5 * (lo + hi)
         if residual(mid) > 0.0:

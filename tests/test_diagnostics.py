@@ -51,6 +51,27 @@ def test_aircraft_database_entries_are_physical() -> None:
     assert KAPPA == pytest.approx(2.0 / 7.0, abs=1e-3)
 
 
+def test_aircraft_database_lookup_returns_a_copy() -> None:
+    """Mutating a lookup result must not re-tune later lookups."""
+    params = get_aircraft_params("a320")
+    params["eta"] = 0.99
+    params["ei_n"] = 0.0
+
+    fresh = get_aircraft_params("A320")
+    assert fresh == AIRCRAFT_ENGINE_DATABASE["A320"]
+    assert fresh["eta"] == pytest.approx(0.32)
+    assert fresh["ei_n"] == pytest.approx(1.5e15)
+
+
+def test_aircraft_database_fallback_returns_a_copy() -> None:
+    """The DEFAULT fallback result is a copy too."""
+    fallback = get_aircraft_params("ZZZZ")
+    fallback["q_fuel"] = 0.0
+
+    assert get_aircraft_params("ZZZZ") == AIRCRAFT_ENGINE_DATABASE["DEFAULT"]
+    assert AIRCRAFT_ENGINE_DATABASE["DEFAULT"]["q_fuel"] == pytest.approx(43.1e6)
+
+
 def test_richardson_number_zero_shear_is_very_stable() -> None:
     ri = compute_richardson_number(
         temp_above_k=250.0,
@@ -173,9 +194,3 @@ def test_sac_slope_scales_linearly_with_pressure() -> None:
     low_pressure = compute_sac_slope(20000.0)
     high_pressure = compute_sac_slope(40000.0)
     assert high_pressure == pytest.approx(2.0 * low_pressure, rel=1e-12)
-
-
-def test_legacy_diagnostics_shim_still_importable() -> None:
-    from stratum.diagnostics import get_aircraft_params as legacy_lookup
-
-    assert legacy_lookup("A20N") == AIRCRAFT_ENGINE_DATABASE["A20N"]

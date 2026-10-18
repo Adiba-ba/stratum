@@ -32,9 +32,15 @@ AIRCRAFT_ENGINE_DATABASE: dict[str, dict[str, float]] = {
 
 
 def get_aircraft_params(aircraft_type: str) -> dict[str, float]:
-    """Retrieve certified propulsion efficiency and soot emission parameters."""
-    return AIRCRAFT_ENGINE_DATABASE.get(
-        aircraft_type.upper(), AIRCRAFT_ENGINE_DATABASE["DEFAULT"]
+    """Retrieve certified propulsion efficiency and soot emission parameters.
+
+    Returns a copy: mutating the result must not re-tune the process-wide
+    registry for later lookups.
+    """
+    return dict(
+        AIRCRAFT_ENGINE_DATABASE.get(
+            aircraft_type.upper(), AIRCRAFT_ENGINE_DATABASE["DEFAULT"]
+        )
     )
 
 

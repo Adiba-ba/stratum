@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from stratum.physics import thermo
@@ -69,6 +71,39 @@ def test_great_circle_requires_two_points() -> None:
         corridor.great_circle_waypoints(
             corridor.AIRPORTS["VIDP"], corridor.AIRPORTS["VABB"], num_points=1
         )
+
+
+def test_great_circle_rejects_antipodal_endpoints() -> None:
+    """Antipodal endpoints make the slerp singular and are rejected."""
+    with pytest.raises(ValueError, match="antipodal"):
+        corridor.great_circle_waypoints((0.0, 0.0), (0.0, 180.0))
+
+
+def test_great_circle_identical_endpoints_still_work() -> None:
+    """Identical endpoints keep the straight-line fill behaviour."""
+    coord = corridor.AIRPORTS["VIDP"]
+    waypoints = corridor.great_circle_waypoints(coord, coord, num_points=3)
+
+    assert len(waypoints) == 3
+    for waypoint in waypoints:
+        assert waypoint["lat"] == pytest.approx(coord[0], abs=1e-9)
+        assert waypoint["lon"] == pytest.approx(coord[1], abs=1e-9)
+
+
+def test_great_circle_normal_route_still_works() -> None:
+    """A non-antipodal route keeps producing finite interior waypoints."""
+    coord1 = corridor.AIRPORTS["VIDP"]
+    coord2 = corridor.AIRPORTS["VABB"]
+    waypoints = corridor.great_circle_waypoints(coord1, coord2)
+
+    assert len(waypoints) == NUM_POINTS
+    assert (waypoints[0]["lat"], waypoints[0]["lon"]) == coord1
+    assert (waypoints[-1]["lat"], waypoints[-1]["lon"]) == coord2
+    for waypoint in waypoints[1:-1]:
+        assert math.isfinite(waypoint["lat"])
+        assert math.isfinite(waypoint["lon"])
+        assert 19.0 <= waypoint["lat"] <= 29.0
+        assert 72.0 <= waypoint["lon"] <= 78.0
 
 
 def test_evaluate_route_profile_validates_lengths() -> None:

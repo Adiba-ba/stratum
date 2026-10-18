@@ -9,6 +9,7 @@ into one *event* so the same avoided contrail is not counted twice.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -17,9 +18,11 @@ import xarray as xr
 
 from stratum.decide.counterfactual import (
     ABSTAIN_THRESHOLD,
+    DEFAULT_SEGMENT_LENGTH_KM,
     AltitudeDecision,
     evaluate_altitude_candidates,
 )
+from stratum.match.label import haversine_km
 from stratum.model.calibrate import CalibratedModel
 from stratum.pipeline.build_features import extract_features_for_trajectory
 
@@ -32,6 +35,35 @@ __all__ = [
 #: "persistent" in the flight statistics (the decision layer activation
 #: uses :data:`stratum.decide.counterfactual.ABSTAIN_THRESHOLD` instead).
 PERSISTENT_PROBABILITY_THRESHOLD: float = 0.50
+
+
+def _segment_lengths_km(metadata: list[dict[str, Any]]) -> list[float]:
+    """Per-point segment length [km] from the haversine of neighbours.
+
+    The length of a point's segment is the great-circle distance to the
+    next point, except for the last point, which uses the distance to the
+    previous point. This is the ``segment_length_km`` handed to
+    :func:`stratum.decide.counterfactual.evaluate_altitude_candidates`
+    so the avoided energy forcing scales with the real flight distance
+    instead of a fixed audit constant.
+    """
+    coordinates = [
+        (float(info["lat"]), float(info["lon"])) for info in metadata
+    ]
+    lengths: list[float] = []
+    for index, coordinate in enumerate(coordinates):
+        if index + 1 < len(coordinates):
+            neighbour = coordinates[index + 1]
+        elif coordinates:
+            neighbour = coordinates[index - 1]
+        else:  # pragma: no cover - metadata is never empty here
+            lengths.append(DEFAULT_SEGMENT_LENGTH_KM)
+            continue
+        length_km = haversine_km(coordinate, neighbour)
+        if not math.isfinite(length_km) or length_km <= 0.0:
+            length_km = DEFAULT_SEGMENT_LENGTH_KM
+        lengths.append(length_km)
+    return lengths
 
 
 def evaluate_corridor_flight(
@@ -65,12 +97,20 @@ def evaluate_corridor_flight(
           is satisfied (physics);
         - ``contrail_persistent_segments`` : segments with calibrated
           ``P(persist) >= 0.50``;
+        - ``out_of_domain_segments`` : segments whose ERA5 data is
+          unavailable (outside the ingestion domain, or interpolation
+          gaps); they never receive a decision and never enter an event;
         - ``total_avoidable_warming_j`` : avoided contrail effective
           forcing summed over reroute events [J];
         - ``recommended_reroutes`` : one structured advisory per
-          contiguous flagged run (level change, fuel/CO2 delta, avoided
-          warming, benefit-to-cost ratio);
-        - ``segments`` : per-segment atmospheric and decision records.
+          contiguous flagged run (level change, the real segment length
+          used for the avoided-forcing accounting, fuel/CO2 delta,
+          avoided warming, benefit-to-cost ratio);
+        - ``segments`` : per-segment atmospheric and decision records;
+          entries carry ``status`` (``"ok"``, ``"out_of_domain"`` or
+          ``"missing_met"``), ``segment_length_km`` (haversine distance
+          to the neighbouring waypoint) and a decision record only when
+          ERA5 data is available.
 
     Raises
     ------
@@ -81,24 +121,32 @@ def evaluate_corridor_flight(
         df_trajectory, ds_met, aircraft_type
     )
     probabilities = np.asarray(model.predict_proba(features), dtype=float)[:, 1]
+    segment_lengths_km = _segment_lengths_km(metadata)
 
     forming_segments = 0
     persistent_segments = 0
+    out_of_domain_segments = 0
     flagged_indices: list[int] = []
     decisions: dict[int, AltitudeDecision] = {}
     segments: list[dict[str, Any]] = []
 
     for index, info in enumerate(metadata):
         probability = float(probabilities[index])
-        if info["sac_forms"]:
-            forming_segments += 1
-        if probability >= PERSISTENT_PROBABILITY_THRESHOLD:
-            persistent_segments += 1
+        if not info["data_available"]:
+            out_of_domain_segments += 1
+        else:
+            if info["sac_forms"]:
+                forming_segments += 1
+            if probability >= PERSISTENT_PROBABILITY_THRESHOLD:
+                persistent_segments += 1
 
         decision: AltitudeDecision | None = None
-        if probability >= ABSTAIN_THRESHOLD:
+        if info["data_available"] and probability >= ABSTAIN_THRESHOLD:
             decision = evaluate_altitude_candidates(
-                probability, float(info["flight_level"]), aircraft_type
+                probability,
+                float(info["flight_level"]),
+                aircraft_type,
+                segment_length_km=segment_lengths_km[index],
             )
             decisions[index] = decision
             flagged_indices.append(index)
@@ -106,10 +154,15 @@ def evaluate_corridor_flight(
         segments.append(
             {
                 "segment_index": index,
+                "status": (
+                    "ok" if info["data_available"] else info["unavailable_reason"]
+                ),
+                "data_available": info["data_available"],
                 "time_utc": info["time_utc"],
                 "lat": info["lat"],
                 "lon": info["lon"],
                 "flight_level": info["flight_level"],
+                "segment_length_km": segment_lengths_km[index],
                 "pressure_pa": info["pressure_pa"],
                 "temperature_c": info["temperature_k"] - 273.15,
                 "rhi": info["rhi"],
@@ -150,6 +203,7 @@ def evaluate_corridor_flight(
                 "segments_in_event": len(group),
                 "p_persist": float(probabilities[representative]),
                 "baseline_fl": float(decision["baseline_fl"]),
+                "segment_length_km": float(decision["segment_length_km"]),
                 "recommended_fl": float(decision["recommended_fl"]),
                 "direction": (
                     "climb"
@@ -174,6 +228,7 @@ def evaluate_corridor_flight(
         "contrail_forming_segments": int(forming_segments),
         "contrail_persistent_segments": int(persistent_segments),
         "flagged_segments": int(len(flagged_indices)),
+        "out_of_domain_segments": int(out_of_domain_segments),
         "total_avoidable_warming_j": total_avoidable_warming_j,
         "total_extra_fuel_kg": total_extra_fuel_kg,
         "total_extra_co2_kg": total_extra_co2_kg,

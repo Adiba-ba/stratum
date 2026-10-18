@@ -40,7 +40,7 @@ LOG_SOOT_INDEX = FEATURE_NAMES.index("log_soot_ei_n")
 
 _CONSTRAINED_INDICES = {
     RHI_INDEX: 1,
-    TLM_K_INDEX: -1,
+    TLM_K_INDEX: 1,
     RICHARDSON_INDEX: -1,
     ETA_INDEX: 1,
     LOG_SOOT_INDEX: 1,
@@ -217,7 +217,7 @@ def test_calibrated_probability_is_monotone_in_physics_features() -> None:
     assert np.all(np.diff(rhi_probs) >= -1e-9)
 
     tlm_probs = sweep(TLM_K_INDEX, np.linspace(224.0, 236.0, 40))
-    assert np.all(np.diff(tlm_probs) <= 1e-9)
+    assert np.all(np.diff(tlm_probs) >= -1e-9)
 
     richardson_probs = sweep(RICHARDSON_INDEX, np.linspace(0.1, 4.0, 40))
     assert np.all(np.diff(richardson_probs) <= 1e-9)

@@ -1,13 +1,13 @@
 """Monotone LightGBM training for the STRATUM correction model.
 
 The classifier is constrained to stay physically consistent: ice
-supersaturation (``rhi``) and warmer ``tlm_k`` thresholds move the
-persistence risk one way or the other per :data:`MONOTONE_CONSTRAINTS`,
-while lower Richardson numbers (turbulent shear), higher engine
-efficiency, and higher soot number emission indices enter the engine and
-turbulence microphysics. Rows whose label is NaN (unobservable scenes,
-e.g. opaque cloud) are strictly masked out and never treated as
-negatives.
+supersaturation (``rhi``) and warmer ``tlm_k`` thresholds both raise the
+persistence risk (warmer mixing-line thresholds raise the critical
+temperature), per :data:`MONOTONE_CONSTRAINTS`, while lower Richardson
+numbers (turbulent shear), higher engine efficiency, and higher soot
+number emission indices enter the engine and turbulence microphysics.
+Rows whose label is NaN (unobservable scenes, e.g. opaque cloud) are
+strictly masked out and never treated as negatives.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ __all__ = [
 #: Native LightGBM monotone constraint per feature: +1 increasing, -1 decreasing.
 MONOTONE_CONSTRAINTS: dict[str, int] = {
     "rhi": 1,
-    "tlm_k": -1,
+    "tlm_k": 1,
     "richardson_number": -1,
     "engine_efficiency_eta": 1,
     "log_soot_ei_n": 1,

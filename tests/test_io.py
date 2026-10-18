@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 import pandas as pd
@@ -11,11 +12,14 @@ import xarray as xr
 
 from stratum.io import (
     ADSB_COLUMNS,
+    ERA5_BBOX,
+    ERA5_PRESSURE_LEVELS_HPA,
     ERA5_VARIABLES,
     SEVIRI_CHANNELS,
     clean_trajectory_points,
     crop_to_domain,
     interpolate_met_to_segment,
+    is_in_domain,
     load_era5_dataset,
 )
 
@@ -378,6 +382,87 @@ def test_load_era5_dataset_normalizes_cds_short_names(tmp_path) -> None:
 def test_load_era5_dataset_missing_file_raises(tmp_path) -> None:
     with pytest.raises(FileNotFoundError):
         load_era5_dataset(str(tmp_path / "does_not_exist.nc"))
+
+
+def test_load_era5_dataset_returns_in_memory_dataset(era5_file: str) -> None:
+    """Every array must be loaded, so no handle outlives the call."""
+    ds = load_era5_dataset(era5_file)
+    for name in ERA5_VARIABLES:
+        # A loaded variable holds a concrete NumPy array rather than a
+        # file-backed adapter such as MemoryCachedArray.
+        assert isinstance(ds[name].variable._data, np.ndarray)
+    # The dataset is self-contained: moving the source file must not
+    # affect it (and would fail on platforms with mandatory file locks
+    # if a handle were still open).
+    moved = f"{era5_file}.moved"
+    os.replace(era5_file, moved)
+    assert os.path.exists(moved)
+    os.replace(moved, era5_file)
+
+
+def test_load_era5_dataset_closes_the_source_handle(
+    era5_file: str, monkeypatch
+) -> None:
+    """The NetCDF store must be closed before the loader returns."""
+    from xarray.backends.netCDF4_ import NetCDF4DataStore
+
+    close_calls = {"count": 0}
+    original_close = NetCDF4DataStore.close
+
+    def counting_close(store) -> None:
+        close_calls["count"] += 1
+        original_close(store)
+
+    monkeypatch.setattr(NetCDF4DataStore, "close", counting_close)
+    load_era5_dataset(era5_file)
+    assert close_calls["count"] >= 1
+
+
+def test_is_in_domain_accepts_inside_point() -> None:
+    assert is_in_domain(22.5, 77.5, 22500.0)
+
+
+def test_is_in_domain_rejects_outside_latitude() -> None:
+    north, _, south, _ = ERA5_BBOX
+    assert not is_in_domain(south - 1.0, 75.0, 22500.0)
+    assert not is_in_domain(north + 1.0, 75.0, 22500.0)
+    # VOBL (13.2 N, 77.7 E) is inside the ADS-B bounds but south of ERA5.
+    assert not is_in_domain(13.2, 77.7, 22500.0)
+
+
+def test_is_in_domain_rejects_outside_longitude() -> None:
+    _, west, _, east = ERA5_BBOX
+    assert not is_in_domain(22.5, west - 1.0, 22500.0)
+    assert not is_in_domain(22.5, east + 1.0, 22500.0)
+
+
+def test_is_in_domain_rejects_outside_pressure() -> None:
+    pressure_min_pa = min(ERA5_PRESSURE_LEVELS_HPA) * 100.0
+    pressure_max_pa = max(ERA5_PRESSURE_LEVELS_HPA) * 100.0
+    assert not is_in_domain(22.5, 77.5, pressure_min_pa - 1.0)
+    assert not is_in_domain(22.5, 77.5, pressure_max_pa + 1.0)
+
+
+def test_is_in_domain_accepts_inclusive_boundaries() -> None:
+    north, west, south, east = ERA5_BBOX
+    pressure_min_pa = min(ERA5_PRESSURE_LEVELS_HPA) * 100.0
+    pressure_max_pa = max(ERA5_PRESSURE_LEVELS_HPA) * 100.0
+    for lat, lon in (
+        (south, west),
+        (south, east),
+        (north, west),
+        (north, east),
+    ):
+        assert is_in_domain(lat, lon, pressure_min_pa)
+        assert is_in_domain(lat, lon, pressure_max_pa)
+    assert is_in_domain(22.5, 77.5, pressure_min_pa)
+    assert is_in_domain(22.5, 77.5, pressure_max_pa)
+
+
+def test_is_in_domain_rejects_non_finite_inputs() -> None:
+    assert not is_in_domain(float("nan"), 75.0, 22500.0)
+    assert not is_in_domain(22.5, float("inf"), 22500.0)
+    assert not is_in_domain(22.5, 77.5, float("nan"))
 
 
 # ---------------------------------------------------------------------------

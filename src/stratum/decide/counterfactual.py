@@ -7,6 +7,15 @@ extra fuel with :mod:`stratum.decide.fuel`, prices the avoided contrail
 energy forcing with :mod:`stratum.decide.climate`, and returns an
 auditable decision record.
 
+The avoided forcing of a candidate is
+
+``P(persist) * effectiveness * MEDIAN_PERSISTENT_EF_J_PER_M * length_m``
+
+with the median persistent-contrail energy forcing per flight metre of the
+Teoh et al. (2024) / contrails CoCiP inventory (see
+:data:`MEDIAN_PERSISTENT_EF_J_PER_M`) and the real segment length supplied
+by the caller in kilometres.
+
 Decision policy:
 
 - ``abstain``: probability below the 0.40 activation threshold; extra
@@ -23,13 +32,15 @@ from typing import TypedDict
 
 from stratum.decide.climate import calculate_net_climate_benefit
 from stratum.decide.fuel import AIRCRAFT_CRUISE_BURN_KG_S, estimate_fuel_penalty
+from stratum.physics.diagnostics import get_aircraft_params
 
 __all__ = [
     "ABSTAIN_THRESHOLD",
     "MAX_ALLOWED_FL",
     "MIN_ALLOWED_FL",
     "ALTITUDE_STEP_FL",
-    "REFERENCE_SEGMENT_EF_J",
+    "DEFAULT_SEGMENT_LENGTH_KM",
+    "MEDIAN_PERSISTENT_EF_J_PER_M",
     "CandidateEvaluation",
     "AltitudeDecision",
     "evaluate_altitude_candidates",
@@ -45,10 +56,20 @@ MIN_ALLOWED_FL: float = 270.0
 #: Primary alternative offset [hundreds of feet] (+/- 2,000 ft).
 ALTITUDE_STEP_FL: float = 20.0
 
-#: Reference contrail energy forcing of a flagged persistent segment [J].
-#: Used to translate a persistence-probability reduction into an avoided
-#: energy forcing; an audit constant, not a per-flight measurement.
-REFERENCE_SEGMENT_EF_J: float = 1.0e10
+#: Median energy forcing per unit flight distance among persistent-contrail
+#: waypoints [J/m]. Source: Teoh et al. (2024), "Global aviation contrail
+#: climate effects from 2019 to 2021", ACP 24, 6071-6093, whose CoCiP-based
+#: 2019 inventory and the percentile table published by the contrails
+#: community (https://apidocs.contrails.org/ef-interpretation.html) report
+#: the median (50th percentile) energy forcing of persistent-contrail
+#: waypoints. The forcing of one flagged segment is this per-metre value
+#: scaled by the real segment length, so the climate side of the decision
+#: is a measured quantity instead of an audit fudge factor.
+MEDIAN_PERSISTENT_EF_J_PER_M: float = 1.74e7
+
+#: Default segment length [km] used when the caller does not supply one:
+#: the ~48 km spacing of the 25-waypoint VIDP-VABB corridor.
+DEFAULT_SEGMENT_LENGTH_KM: float = 48.0
 
 #: Escape effectiveness of each direction (fraction of the flagged
 #: segment's contrail energy forcing removed) when the layer is left.
@@ -76,8 +97,10 @@ class AltitudeDecision(TypedDict):
     """Decision record returned by :func:`evaluate_altitude_candidates`."""
 
     status: str
+    aircraft_type: str
     baseline_fl: float
     baseline_p_persist: float
+    segment_length_km: float
     recommended_fl: float | None
     delta_fuel_kg: float | None
     delta_co2_kg: float | None
@@ -87,11 +110,28 @@ class AltitudeDecision(TypedDict):
     reason: str
 
 
+def _resolve_aircraft_key(aircraft_type: str) -> str:
+    """Resolve the fuel-model key for an aircraft type.
+
+    Types covered by :data:`AIRCRAFT_CRUISE_BURN_KG_S` are returned as-is.
+    Any other type is validated against the physics registry
+    (:func:`stratum.physics.diagnostics.get_aircraft_params`) and then
+    degrades to ``"DEFAULT"`` so the decision layer never propagates an
+    unexpected :class:`ValueError` from the fuel model.
+    """
+    key = aircraft_type.strip().upper()
+    if key in AIRCRAFT_CRUISE_BURN_KG_S:
+        return key
+    get_aircraft_params(key)
+    return "DEFAULT"
+
+
 def _evaluate_candidate(
     baseline_p_persist: float,
     baseline_fl: float,
     delta_fl: float,
     aircraft_type: str,
+    segment_length_km: float,
 ) -> CandidateEvaluation:
     """Evaluate one +/- ``ALTITUDE_STEP_FL`` candidate against all gates."""
     target_fl = baseline_fl + delta_fl
@@ -126,7 +166,13 @@ def _evaluate_candidate(
     effectiveness = (
         _CLIMB_EFFECTIVENESS if delta_fl > 0.0 else _DESCENT_EFFECTIVENESS
     )
-    avoided_ef_j = baseline_p_persist * effectiveness * REFERENCE_SEGMENT_EF_J
+    avoided_ef_j = (
+        baseline_p_persist
+        * effectiveness
+        * MEDIAN_PERSISTENT_EF_J_PER_M
+        * segment_length_km
+        * 1000.0
+    )
     benefit = calculate_net_climate_benefit(avoided_ef_j, penalty["delta_co2_kg"])
     return CandidateEvaluation(
         target_fl=target_fl,
@@ -147,6 +193,7 @@ def evaluate_altitude_candidates(
     baseline_p_persist: float,
     baseline_fl: float,
     aircraft_type: str = "A320",
+    segment_length_km: float = DEFAULT_SEGMENT_LENGTH_KM,
 ) -> AltitudeDecision:
     """Evaluate the primary counterfactual flight levels for a segment.
 
@@ -159,20 +206,30 @@ def evaluate_altitude_candidates(
         Current flight level, in hundreds of feet (FL350 -> ``350.0``).
     aircraft_type : str, optional
         Aircraft type for the fuel penalty model, by default ``"A320"``.
+        Types outside :data:`AIRCRAFT_CRUISE_BURN_KG_S` fall back to
+        ``"DEFAULT"``.
+    segment_length_km : float, optional
+        Length of the flagged segment [km], by default
+        :data:`DEFAULT_SEGMENT_LENGTH_KM` (the ~48 km spacing of the
+        25-waypoint VIDP-VABB corridor). The avoided contrail energy
+        forcing scales linearly with this length through
+        :data:`MEDIAN_PERSISTENT_EF_J_PER_M` (Teoh et al. 2024 CoCiP
+        inventory).
 
     Returns
     -------
     AltitudeDecision
         Decision record with ``status`` one of ``"abstain"``,
-        ``"eligible"``, ``"no_robust_candidate"``, the baseline state,
-        the recommendation (when eligible), and the per-candidate
-        evaluation records.
+        ``"eligible"``, ``"no_robust_candidate"``, the resolved
+        ``aircraft_type`` key, the baseline state, the segment length, the
+        recommendation (when eligible), and the per-candidate evaluation
+        records.
 
     Raises
     ------
     ValueError
         For a probability outside ``[0.0, 1.0]``, a non-positive baseline
-        flight level, or an unsupported aircraft type.
+        flight level, or a non-positive segment length.
     """
     p_persist = float(baseline_p_persist)
     if not math.isfinite(p_persist) or not 0.0 <= p_persist <= 1.0:
@@ -181,18 +238,20 @@ def evaluate_altitude_candidates(
         )
     if baseline_fl <= 0.0:
         raise ValueError(f"baseline_fl must be positive, got {baseline_fl!r}")
-    key = aircraft_type.strip().upper()
-    if key not in AIRCRAFT_CRUISE_BURN_KG_S:
-        supported = ", ".join(sorted(AIRCRAFT_CRUISE_BURN_KG_S))
+    segment_length_km = float(segment_length_km)
+    if not math.isfinite(segment_length_km) or segment_length_km <= 0.0:
         raise ValueError(
-            f"unsupported aircraft_type {aircraft_type!r}; expected one of {supported}"
+            f"segment_length_km must be positive, got {segment_length_km!r}"
         )
+    key = _resolve_aircraft_key(aircraft_type)
 
     if p_persist < ABSTAIN_THRESHOLD:
         return AltitudeDecision(
             status="abstain",
+            aircraft_type=key,
             baseline_fl=baseline_fl,
             baseline_p_persist=p_persist,
+            segment_length_km=segment_length_km,
             recommended_fl=None,
             delta_fuel_kg=None,
             delta_co2_kg=None,
@@ -207,8 +266,12 @@ def evaluate_altitude_candidates(
         )
 
     candidates = [
-        _evaluate_candidate(p_persist, baseline_fl, +ALTITUDE_STEP_FL, aircraft_type),
-        _evaluate_candidate(p_persist, baseline_fl, -ALTITUDE_STEP_FL, aircraft_type),
+        _evaluate_candidate(
+            p_persist, baseline_fl, +ALTITUDE_STEP_FL, key, segment_length_km
+        ),
+        _evaluate_candidate(
+            p_persist, baseline_fl, -ALTITUDE_STEP_FL, key, segment_length_km
+        ),
     ]
     eligible = [
         candidate
@@ -218,8 +281,10 @@ def evaluate_altitude_candidates(
     if not eligible:
         return AltitudeDecision(
             status="no_robust_candidate",
+            aircraft_type=key,
             baseline_fl=baseline_fl,
             baseline_p_persist=p_persist,
+            segment_length_km=segment_length_km,
             recommended_fl=None,
             delta_fuel_kg=None,
             delta_co2_kg=None,
@@ -232,8 +297,10 @@ def evaluate_altitude_candidates(
     best = max(eligible, key=lambda candidate: candidate["benefit_to_cost_ratio"])
     return AltitudeDecision(
         status="eligible",
+        aircraft_type=key,
         baseline_fl=baseline_fl,
         baseline_p_persist=p_persist,
+        segment_length_km=segment_length_km,
         recommended_fl=best["target_fl"],
         delta_fuel_kg=best["delta_fuel_kg"],
         delta_co2_kg=best["delta_co2_kg"],

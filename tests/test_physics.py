@@ -57,3 +57,19 @@ def test_sac_points(t_c: float, rhi: float, forms: bool, persists: bool) -> None
     result = sac.evaluate_sac(P250_PA, t_c + 273.15, rhi, eta=ETA)
     assert result["forms"] is forms, result
     assert result["persists"] is persists, result
+
+
+def test_critical_t_bracket_failure_raises() -> None:
+    """An inconsistent (TLM, G) pair fails the root bracket loudly."""
+    with pytest.raises(ValueError, match="bracket failed") as excinfo:
+        sac.critical_T(rhw=0.5, TLM=231.0, G=0.01)
+    message = str(excinfo.value)
+    assert "rhw=0.5" in message
+    assert "TLM=231.0" in message
+    assert "G=0.01" in message
+
+
+def test_evaluate_sac_raises_on_impossible_mixing_slope() -> None:
+    """SAC evaluation fails loudly instead of returning a bogus ``forms``."""
+    with pytest.raises(ValueError):
+        sac.evaluate_sac(p_Pa=10.0, T_K=220.0, rhi=0.5)
