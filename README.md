@@ -49,7 +49,7 @@ ERA5 reanalysis      ADS-B trajectories     satellite BTD pairs
 pip install -e ".[dev]"
 ```
 
-Extras: `data` adds `cdsapi`, `figures` adds `matplotlib`, `geo` adds `pyproj`. Core dependencies are numpy, pandas, scipy, xarray, netCDF4, scikit-learn, lightgbm, and joblib.
+Extras: `data` adds `cdsapi` and `eumdac`, `figures` adds `matplotlib`, `geo` adds `pyproj`. Core dependencies are numpy, pandas, scipy, xarray, netCDF4, scikit-learn, lightgbm, and joblib.
 
 ## Commands
 
@@ -64,11 +64,16 @@ Extras: `data` adds `cdsapi`, `figures` adds `matplotlib`, `geo` adds `pyproj`. 
 | `stratum profile` | Vertical risk profile per waypoint and flight level with a recommended level. |
 | `stratum detect-scene` | Detect contrail lines in a split-window satellite scene and georeference them. |
 | `stratum fetch goes` | Download GOES-16 ABI L2 CMI granules from the public bucket. |
-| `stratum fetch adsb-live` | Snapshot the anonymous OpenSky `/api/states/all` endpoint to CSV. |
+| `stratum fetch adsb-live` | Snapshot OpenSky `/api/states/all` to CSV, anonymous or authenticated. |
+| `stratum fetch adsb-history` | Pull OpenSky flight tracks over an interval into the canonical ADS-B CSV. |
+| `stratum fetch seviri` | Download a MSG SEVIRI Level 1.5 granule from the EUMETSAT Data Store. |
+| `stratum fetch era5` | Request ERA5 pressure-level fields from the Climate Data Store. |
 | `stratum check-live` | Sample the Open-Meteo pressure-level forecast along the built-in RJAA to RJBB track. |
 | `stratum demo` | Run one synthetic fixture demo: `detector`, `matching`, `decision`, `model-fixture`. |
 
 Every command accepts `--help` for its full flag list.
+
+The three authenticated fetch commands read `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET`, `EUMETSAT_CONSUMER_KEY`, `EUMETSAT_CONSUMER_SECRET`, `EUMETSAT_API_TOKEN`, `CDSAPI_URL` and `CDSAPI_KEY` from the environment, and fall back to a `.env` file in the working directory. `.env.example` lists the names and `.env` stays out of git.
 
 ## Quickstart
 
@@ -112,9 +117,9 @@ Observed result: 25 waypoints, recommended FL330 at 6 waypoints and FL350 at 19,
 
 ## Data inputs
 
-- ERA5 reanalysis: `temperature`, `specific_humidity`, `u_component_of_wind`, `v_component_of_wind`, `vertical_velocity`, `fraction_of_cloud_cover` on pressure levels. The bundled file `data/era5_del_bom_20250101.nc` covers 15-32 N, 68-82 E, 200-400 hPa, 24 hourly steps on 2025-01-01 (6.6 MB).
-- ADS-B trajectories: canonical OpenSky/ADS-B Exchange schema. The CLI takes trajectories from CSV, or generates great-circle route profiles when no ADS-B file is supplied.
-- Satellite scenes: GOES-16 ABI L2 CMI bands 14 and 15 in `data/cache/goes16/`, plus SEVIRI IR_108/IR_120/IR_087 support for the Indian domain through EUMETSAT.
+- ERA5 reanalysis: `temperature`, `specific_humidity`, `u_component_of_wind`, `v_component_of_wind`, `vertical_velocity`, `fraction_of_cloud_cover` on pressure levels. The bundled file `data/era5_del_bom_20250101.nc` covers 15-32 N, 68-82 E, 200-400 hPa, 24 hourly steps on 2025-01-01 (6.6 MB). `stratum fetch era5` pulls a wider extract: 5-40 N, 60-95 E, hourly, one file per day under `data/cache/era5/`, and the operating domain follows that area.
+- ADS-B trajectories: canonical OpenSky/ADS-B Exchange schema. The CLI takes trajectories from CSV, or generates great-circle route profiles when no ADS-B file is supplied. `stratum fetch adsb-history` writes that CSV from OpenSky flight tracks; the track endpoint serves the last 30 days only, and ground speed and vertical rate are derived from consecutive fixes because the endpoint reports neither.
+- Satellite scenes: GOES-16 ABI L2 CMI bands 14 and 15 in `data/cache/goes16/`, plus SEVIRI IR_108/IR_120/IR_087 support for the Indian domain through EUMETSAT. `stratum fetch seviri` downloads the MSG Level 1.5 granule; the account has to accept the Data Store General Licence once, and the native HRIT files still need conversion to NetCDF for `detect-scene`.
 - Open-Meteo forecast: used only by `stratum check-live` for the built-in RJAA to RJBB track.
 
 ## Status and limitations

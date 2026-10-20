@@ -19,21 +19,28 @@ semantic versioning.
   parallax-corrected ADS-B segments.
 - CLI commands `verify-baseline`, `screen-routes`, `corridor`, `profile`,
   `build-physics-labels`, `build-observed-labels`, `train`, `detect-scene`,
-  `fetch goes`, `fetch adsb-live`, `check-live`, and `demo`.
+  `fetch goes`, `fetch adsb-live`, `fetch adsb-history`, `fetch seviri`,
+  `fetch era5`, `check-live`, and `demo`.
+- Authenticated fetch commands: OpenSky OAuth2 client credentials for flight
+  tracks, EUMETSAT Data Store access for MSG SEVIRI granules, and CDS access
+  for ERA5 requests.
+- Credentials read from the environment with a gitignored `.env` fallback, plus
+  an `.env.example` that lists the variable names.
 - Direction-aware HTML corridor report that reads the decision data instead of
   hardcoding a descent narrative.
 - Joblib model artifacts with self-describing metadata sidecars and a recorded
   training envelope (pressure range and flight levels).
 - ERA5 in-memory load with out-of-domain and missing-met handling.
 - Documentation set: README and `docs/architecture.md`, `docs/physics.md`,
-  `docs/model.md`, `docs/data.md`, `docs/decisions.md`.
+  `docs/model.md`, `docs/data.md`, `docs/decisions.md`, `docs/backlog.md`, and
+  this changelog.
 - Real evidence: ERA5 physics labels, corridor HTML/JSON, vertical profile JSON,
   and the GOES-16 scene detection with preview image.
-- Tests expanded from 120 to 243 collected cases.
+- Tests expanded from 120 to 269 collected cases.
 
 ### Fixed
 
-- `tlm_k` monotone constraint sign flipped to +1; risk rises with the
+- `tlm_k` monotone constraint sign flipped to +1. Risk rises with the
   mixing-line temperature.
 - CO2 side of the benefit-to-cost ratio moved to J/m^2 with cited AR6 AGWP
   values (`2.39e-14` at 20 yr, `8.80e-14` at 100 yr, linear interpolation).
@@ -50,7 +57,15 @@ semantic versioning.
   the old nadir-angle form capped the angle near 9.7 deg and could never trip
   the 60 deg observability gate.
 - `screen-routes` prepends a synthetic-scenario banner so invented
-  temperature/RHi knots cannot be mistaken for real screening.
+  temperature/RHi knots can't be mistaken for real screening.
+- Ground speed and vertical rate are derived from consecutive OpenSky track
+  fixes, because the track endpoint reports neither; the loader's kinematic
+  gate dropped every such row before.
+- Ground speed is written in knots, matching the canonical `gs_kt` column.
+- The OpenSky 30-day track window is checked before a request goes out, and the
+  sentinel 429 is reported as the window limit rather than a retry time.
+- The CDS fetch probes the host before queueing, so an unreachable Climate Data
+  Store fails fast instead of retrying for hours.
 
 ### Changed
 
@@ -58,6 +73,8 @@ semantic versioning.
 - Package moved from top-level `stratum/` to `src/stratum/`.
 - `build_features.py` rewritten under `src/stratum/pipeline/` for the 21-feature
   schema.
+- The ERA5 operating domain widened to 5-40 N and 60-95 E, matching the
+  seven-day extract that now covers every Indian airport in the route set.
 
 ### Removed
 
