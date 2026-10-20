@@ -1,0 +1,69 @@
+{
+  "dataset": "data/labels_physics_2025-01-01_07d.csv",
+  "feature_names": [
+    "rhi",
+    "rhi_above",
+    "rhi_below",
+    "rhi_grad",
+    "temp_k",
+    "tlm_k",
+    "tlc_k",
+    "pressure_pa",
+    "cloud_ice",
+    "high_cloud_fraction",
+    "vertical_velocity_omega",
+    "vertical_wind_shear",
+    "dist_to_tropopause_m",
+    "lat",
+    "lon",
+    "month",
+    "local_solar_time_hours",
+    "richardson_number",
+    "solar_zenith_deg",
+    "engine_efficiency_eta",
+    "log_soot_ei_n"
+  ],
+  "metrics": {
+    "brier_calibrated": 0.0,
+    "brier_raw": 2.4100414095124528e-14,
+    "mean_probability_negative": 0.0,
+    "mean_probability_positive": 1.0,
+    "n_masked": 67516,
+    "n_samples": 75600,
+    "n_train": 26550,
+    "n_train_labeled": 6881,
+    "n_val": 49050,
+    "n_val_labeled": 1203,
+    "n_val_negative": 1179,
+    "n_val_positive": 24
+  },
+  "provenance": {
+    "dataset_mtime_utc": "2026-10-20T17:15:48.763040+00:00",
+    "dataset_path": "data/labels_physics_2025-01-01_07d.csv",
+    "dataset_sha256": "8b557eee4f7b965da482419418a279f77b4d4eceffae312f0838626580c59963",
+    "dataset_size_bytes": 25927708
+  },
+  "training": {
+    "min_train_rows": 50,
+    "monotone_checks": {
+      "rhi": true,
+      "tlm_k": true
+    },
+    "n_masked": 67516,
+    "n_samples": 75600,
+    "n_train": 26550,
+    "n_val": 49050,
+    "single_time_step": false,
+    "time_ordered_split": true,
+    "val_fraction": 0.3
+  },
+  "training_envelope": {
+    "flight_levels": [
+      330,
+      350,
+      370
+    ],
+    "pressure_pa_max": 26201.35799044055,
+    "pressure_pa_min": 21663.2945727847
+  }
+}

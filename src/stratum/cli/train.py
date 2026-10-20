@@ -126,6 +126,14 @@ def _rounded_flight_level(pressure_pa: float) -> int:
     return int(round(level)) * _FLIGHT_LEVEL_QUANTUM
 
 
+def _mean_probability(probabilities: np.ndarray, mask: np.ndarray) -> float:
+    """Mean predicted probability over the rows selected by ``mask``."""
+    selected = np.asarray(probabilities)[np.asarray(mask, dtype=bool)]
+    if selected.size == 0:
+        return float("nan")
+    return float(np.mean(selected))
+
+
 def _training_envelope(
     metadata: list[dict[str, Any]],
     train_idx: np.ndarray,
@@ -251,6 +259,16 @@ def train(argv: list[str]) -> int:
         default=50,
         help="minimum labeled training rows required (default 50)",
     )
+    parser.add_argument(
+        "--min-val-positive",
+        type=int,
+        default=20,
+        help=(
+            "minimum persistent rows the validation block must hold "
+            "(default 20); the block is the last contiguous stretch of "
+            "time steps with enough labeled and persistent rows"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.dataset.is_file():
@@ -322,8 +340,49 @@ def train(argv: list[str]) -> int:
 
     n_val = int(round(args.val_fraction * n_rows))
     n_val = max(1, min(n_rows - 1, n_val))
-    train_idx = np.asarray(order[: n_rows - n_val], dtype=int)
-    val_idx = np.asarray(order[n_rows - n_val :], dtype=int)
+    min_val_labeled = max(int(args.min_train_rows), 50)
+    min_val_positive = max(int(args.min_val_positive), 5)
+
+    # A blind time-ordered tail can hold almost no labeled rows when the
+    # physics censors most of the period: contrail formation is
+    # synoptic, so a cold spell leaves whole days without a single
+    # labeled sample. The validation block is therefore the last
+    # contiguous stretch of time steps that carries enough labeled rows
+    # and at least a few persistent ones, and training uses the rows
+    # strictly before it. No later row ever enters training, so the
+    # split stays free of time leakage.
+    unique_times = np.unique(times[order])
+    labeled_by_time = np.array(
+        [int(np.isfinite(labels[order[times[order] == value]]).sum()) for value in unique_times]
+    )
+    positive_by_time = np.array(
+        [int((labels[order[times[order] == value]] == 1.0).sum()) for value in unique_times]
+    )
+    suffix_labeled = 0
+    suffix_positive = 0
+    val_start = len(unique_times)
+    for position in range(len(unique_times) - 1, -1, -1):
+        suffix_labeled += int(labeled_by_time[position])
+        suffix_positive += int(positive_by_time[position])
+        if suffix_labeled >= min_val_labeled and suffix_positive >= min_val_positive:
+            val_start = position
+            break
+    if val_start >= len(unique_times):
+        print(
+            f"ERROR: no trailing block of time steps carries both "
+            f"{min_val_labeled} labeled and {min_val_positive} persistent "
+            f"rows; the dataset has {int(np.isfinite(labels).sum())} labeled "
+            f"and {int((labels == 1.0).sum())} persistent rows in total. "
+            "Lower --min-val-positive, label a longer period, or use a "
+            "dataset with more formation.",
+            file=sys.stderr,
+        )
+        return 1
+
+    val_times = set(unique_times[val_start:])
+    in_val = np.array([value in val_times for value in times[order]])
+    val_idx = np.asarray(order[in_val], dtype=int)
+    train_idx = np.asarray(order[~in_val], dtype=int)
 
     train_labeled = np.isfinite(labels[train_idx])
     n_train_labeled = int(train_labeled.sum())
@@ -378,6 +437,14 @@ def train(argv: list[str]) -> int:
         "n_masked": n_masked,
         "brier_raw": compute_brier_score(labels_val, raw_probabilities),
         "brier_calibrated": compute_brier_score(labels_val, calibrated_probabilities),
+        "n_val_positive": int((labels_val == 1.0).sum()),
+        "n_val_negative": int((labels_val == 0.0).sum()),
+        "mean_probability_positive": _mean_probability(
+            calibrated_probabilities, labels_val == 1.0
+        ),
+        "mean_probability_negative": _mean_probability(
+            calibrated_probabilities, labels_val == 0.0
+        ),
     }
 
     monotone = _monotone_checks(calibrated, features[train_idx][train_labeled])
@@ -450,6 +517,12 @@ def train(argv: list[str]) -> int:
     print(
         f"Validation Brier: raw {metrics['brier_raw']:.5f} -> calibrated "
         f"{metrics['brier_calibrated']:.5f}"
+    )
+    print(
+        f"Validation classes: {metrics['n_val_positive']} persistent, "
+        f"{metrics['n_val_negative']} subsaturated | mean probability "
+        f"{metrics['mean_probability_positive']:.3f} on persistent rows, "
+        f"{metrics['mean_probability_negative']:.3f} on subsaturated rows"
     )
     check_text = " | ".join(
         f"{name} {'PASS' if passed else 'FAIL'}" for name, passed in monotone.items()
