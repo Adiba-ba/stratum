@@ -176,11 +176,11 @@ def test_build_physics_labels_censors_non_forming_and_missing_data() -> None:
     assert meta[0]["censored_reason"] == CENSORED_SAC_NOT_FORMED
     assert np.all(np.isfinite(features))
 
-    # 10 N lies south of the ERA5 domain (15-32 N): the point sample has
+    # 2 N lies south of the ERA5 domain (5-40 N): the point sample has
     # no reanalysis state, and only such a genuinely missing point sample
     # censors a row. An out-of-range +/-25 hPa probe does not (see the
     # probe test below).
-    out_of_domain = (10.0, 77.0, _PRESSURE_PA, _SAMPLE_TIME)
+    out_of_domain = (2.0, 77.0, _PRESSURE_PA, _SAMPLE_TIME)
     features_missing, labels_missing, meta_missing = build_physics_labels(
         _mock_met(1.3), [out_of_domain]
     )

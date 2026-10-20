@@ -32,7 +32,10 @@ __all__ = [
 ]
 
 #: Domain bounding box (North, West, South, East) [deg].
-ERA5_BBOX: tuple[float, float, float, float] = (32.0, 68.0, 15.0, 82.0)
+#: Operating domain of the pipeline: north, west, south, east [deg].
+#: Covers the Indian subcontinent, the Arabian Sea and the Bay of Bengal,
+#: which is the area the downloaded ERA5 extract spans.
+ERA5_BBOX: tuple[float, float, float, float] = (40.0, 60.0, 5.0, 95.0)
 
 #: Pressure levels [hPa] stored for the pipeline.
 ERA5_PRESSURE_LEVELS_HPA: tuple[int, ...] = (200, 225, 250, 300, 350, 400)

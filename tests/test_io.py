@@ -426,8 +426,8 @@ def test_is_in_domain_rejects_outside_latitude() -> None:
     north, _, south, _ = ERA5_BBOX
     assert not is_in_domain(south - 1.0, 75.0, 22500.0)
     assert not is_in_domain(north + 1.0, 75.0, 22500.0)
-    # VOBL (13.2 N, 77.7 E) is inside the ADS-B bounds but south of ERA5.
-    assert not is_in_domain(13.2, 77.7, 22500.0)
+    # VOBL (13.2 N, 77.7 E) is inside the widened Indian domain.
+    assert is_in_domain(13.2, 77.7, 22500.0)
 
 
 def test_is_in_domain_rejects_outside_longitude() -> None:

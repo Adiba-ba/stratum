@@ -434,8 +434,9 @@ def _trajectory_with_out_of_domain_dip(
     """Return the cruise trajectory with a southern dip outside ERA5_BBOX."""
     trajectory = _trajectory()
     for index in outside:
-        # 10 deg N is inside the ADS-B bounds (6-37 N) but south of ERA5.
-        trajectory.loc[index, "lat"] = 10.0
+        # 2 deg N is inside the ADS-B bounds (6-37 N) but south of the
+        # ERA5 domain (5-40 N).
+        trajectory.loc[index, "lat"] = 2.0
     return trajectory
 
 
