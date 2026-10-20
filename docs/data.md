@@ -12,15 +12,29 @@ Provenance: ERA5 is produced by ECMWF and distributed through the Copernicus Cli
 
 ```bash
 stratum fetch era5 --date 2025-01-01 --days 1 --out data/cache/era5/era5_2025-01-01.nc
+
+stratum fetch era5 --date 2025-01-01 --days 7 \
+  --out data/cache/era5/era5_india_2025-01-01_2025-01-07.nc
 ```
 
 Authentication: `cdsapi.Client()` reads `~/.cdsapirc`. When `CDSAPI_URL` and `CDSAPI_KEY` are set they're passed to `cdsapi.Client(url=..., key=...)`. Missing credentials exit 2 with a pointer to `~/.cdsapirc`. The command probes the host before queueing, because the client otherwise retries a failing host for hours; an unreachable CDS host exits 2 with the probe error.
 
-The shipped seven-day extract lives in `data/cache/era5/`: one file per day (about 34 MB) plus the merged `era5_india_2025-01-01_2025-01-07.nc` (168 hourly steps, 141 x 141 points at 0.25 degree, 5-40 N and 60-95 E). The cache is gitignored because of the size; the repository ships the 6.6 MB single-day corridor extract instead.
+The shipped seven-day extract lives in `data/cache/era5/`: one file per day (`era5_india_2025-01-01.nc` through `era5_india_2025-01-07.nc`, 33-35 MB each, 24 hourly steps each) plus the merged `era5_india_2025-01-01_2025-01-07.nc` (241 MB, 168 hourly steps, 141 x 141 points at 0.25 degree, 5-40 N and 60-95 E, pressure levels 200, 225, 250, 300, 350 and 400 hPa). The cache is gitignored because of the size; the repository ships the 6.6 MB single-day corridor extract instead.
 
 Bundled file `data/era5_del_bom_20250101.nc` (6.6 MB): 15-32 N, 68-82 E on a 0.25 degree grid (69 x 57 points), pressure levels 200-400 hPa, 24 hourly steps from 2025-01-01T00:00 to 23:00 UTC, for the Delhi to Mumbai corridor day.
 
-Interpolation: `interpolate_met_to_segment` performs multi-dimensional linear interpolation over latitude, longitude, pressure, and time. Query points outside the dataset return `nan` values.
+Interpolation: `interpolate_met_to_segment` performs multi-dimensional linear interpolation over latitude, longitude, pressure, and time. Query points outside the dataset return `nan` values. The time axis is handled separately: the two bracketing hours are selected first and the space interpolation runs on those slices, so a query costs the same on a one-week file as on a one-day file. On the seven-day extract that path measures 4 ms per call against 1.2 s for the full four-dimensional interpolation, and the two agree to 1e-14.
+
+## Labeled datasets
+
+`stratum build-physics-labels` writes one CSV per label build, in the frozen 21-feature order plus `label` and `time`.
+
+| Dataset | Rows | Labeled | Censored | Trained model |
+| --- | --- | --- | --- | --- |
+| `data/labels_physics_2025-01-01_07d.csv` | 75,600 | 8,084 (2,140 persistent, 5,944 subsaturated) | 67,516, all `sac_not_formed` | `models/era5-physics-2025-01-01_07d.joblib` |
+| `data/labels_physics_2025-01-01.csv` | 7,200 | 1,852 (256 persistent, 1,596 subsaturated) | 5,348 (4,124 `sac_not_formed`, 1,224 `data_unavailable`) | `models/era5-physics-2025-01-01.joblib` |
+
+The model behind the shipped reports is `models/era5-physics-2025-01-01_07d.joblib`, trained on the seven-day file (SHA-256 `8b557eee4f7b965da482419418a279f77b4d4eceffae312f0838626580c59963`, 25,927,708 bytes, committed to the repository). The seven-day file covers 168 hourly steps from 2025-01-01 to 2025-01-07 over six routes at FL330, FL350 and FL370; every row carries ERA5 data, because the widened domain removed the out-of-domain samples. The single-day file was built from the bundled `data/era5_del_bom_20250101.nc` and is kept as the small-sample dataset next to its model. The model directory itself is gitignored, so the training metrics of the seven-day run are committed as `reports/model_metrics_2025-01-01_07d.json`.
 
 ## ADS-B trajectories
 
@@ -77,12 +91,14 @@ stratum fetch seviri --date 2025-01-01 --hour 20 --channels 108,120 --out data/c
 ```
 data/
   era5_del_bom_20250101.nc              bundled ERA5 day
-  labels_physics_2025-01-01.csv         bundled labels (7200 rows; 1852 labeled, 5348 censored)
+  labels_physics_2025-01-01.csv         bundled single-day labels (7200 rows; 1852 labeled, 5348 censored)
+  labels_physics_2025-01-01_07d.csv     seven-day labels (75600 rows; 8084 labeled, 67516 censored)
   cache/goes16/*.nc                     fetched GOES-16 granules
   cache/opensky_snapshot.csv            fetched live ADS-B snapshot
   cache/adsb_history.csv                fetched OpenSky flight tracks
   cache/seviri/*.nat                    fetched MSG SEVIRI HRIT members
-  cache/era5/era5_YYYY-MM-DD.nc         fetched ERA5 NetCDF
+  cache/era5/era5_india_YYYY-MM-DD.nc   fetched ERA5 NetCDF, one file per day
+  cache/era5/era5_india_YYYY-MM-DD_YYYY-MM-DD.nc   fetched ERA5 NetCDF, merged over several days
 ```
 
 The physics label CSV is a reanalysis surrogate: the SAC and ice-supersaturation rule applied to ERA5 fields, not observed contrails. No label in the repository comes from the GOES-16 scene above.

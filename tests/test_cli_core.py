@@ -240,9 +240,19 @@ def test_train_writes_artifact_and_metrics(
     metrics = payload["metrics"]
     assert math.isfinite(metrics["brier_raw"])
     assert math.isfinite(metrics["brier_calibrated"])
-    assert metrics["n_train"] == 105
-    assert metrics["n_val"] == 45
+    # The validation block is the last contiguous stretch of time steps
+    # that carries enough labeled and persistent rows; the fixture holds
+    # two time steps, so the block is the later one and training keeps
+    # the earlier one.
+    assert metrics["n_train"] + metrics["n_val"] == metrics["n_samples"]
+    assert metrics["n_val"] == 75
+    assert metrics["n_train"] == 75
     assert metrics["n_masked"] == 0
+    assert metrics["n_val_labeled"] >= 50
+    assert metrics["n_val_positive"] >= 20
+    assert metrics["n_val_positive"] + metrics["n_val_negative"] == metrics[
+        "n_val_labeled"
+    ]
 
     # The training envelope records the range the labeled training rows
     # cover: FL330/FL350/FL370, i.e. the ISA pressures of those levels.
@@ -417,3 +427,38 @@ def test_build_observed_labels_missing_inputs_exits_2(tmp_path: Path) -> None:
         ]
     )
     assert code == 2
+
+
+def test_train_reports_when_no_validation_block_can_be_scored(
+    physics_dataset: PhysicsDataset, tmp_path: Path
+) -> None:
+    """A tail without persistent rows cannot be validated; say so plainly."""
+    frame = pd.read_csv(physics_dataset.labels)
+    latest = pd.to_datetime(frame["time"]).max()
+    frame.loc[pd.to_datetime(frame["time"]) == latest, "label"] = float("nan")
+    dataset = tmp_path / "no_tail_labels.csv"
+    frame.to_csv(dataset, index=False)
+
+    artifact = tmp_path / "model.joblib"
+    code = train_cli.train(["--dataset", str(dataset), "--out", str(artifact)])
+    assert code == 1
+    assert not artifact.exists()
+
+
+def test_validation_block_holds_later_times_than_training(
+    physics_dataset: PhysicsDataset, tmp_path: Path
+) -> None:
+    """The split must not leak later times into training."""
+    artifact = tmp_path / "model.joblib"
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = train_cli.train(
+            ["--dataset", str(physics_dataset.labels), "--out", str(artifact)]
+        )
+    assert code == 0, buffer.getvalue()
+    payload = json.loads(
+        artifact.with_suffix(".metrics.json").read_text(encoding="utf-8")
+    )
+    assert payload["training"]["time_ordered_split"] is True
+    assert payload["metrics"]["n_val_labeled"] >= 50
+    assert payload["metrics"]["n_val_positive"] >= 20

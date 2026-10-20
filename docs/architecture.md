@@ -13,7 +13,7 @@ STRATUM is a Python package under `src/stratum/`. One command-line entry point, 
 | `cli/corridor.py` | `corridor`: one flight from ERA5 plus trajectory to an HTML/JSON report. |
 | `cli/profile.py` | `profile`: per-waypoint risk across flight levels, with `risk_band`. |
 | `cli/scene.py` | `detect-scene`: split-window detection and georeferencing. |
-| `cli/fetch.py` | `fetch goes` and `fetch adsb-live` downloaders. |
+| `cli/fetch.py` | `fetch goes`, `fetch adsb-live`, `fetch adsb-history`, `fetch seviri` and `fetch era5` downloaders. |
 | `cli/live.py` | `check-live`: Open-Meteo forecast along the built-in RJAA to RJBB track. |
 | `cli/demos.py` | `demo` fixtures: `detector`, `matching`, `decision`, `model-fixture`. |
 | `physics/thermo.py` | Murphy & Koop (2005) saturation curves, their analytic derivative, ISA flight level to pressure. |

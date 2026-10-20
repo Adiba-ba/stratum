@@ -31,12 +31,27 @@ semantic versioning.
 - Joblib model artifacts with self-describing metadata sidecars and a recorded
   training envelope (pressure range and flight levels).
 - ERA5 in-memory load with out-of-domain and missing-met handling.
+- Seven-day ERA5 extract: `stratum fetch era5` requests `--days` days in one
+  file (default 7), and the cache keeps one file per day plus the merged
+  seven-day NetCDF under `data/cache/era5/`.
+- Seven-day training set `data/labels_physics_2025-01-01_07d.csv`: 75,600
+  rows over 168 hourly steps from 2025-01-01 to 2025-01-07, built from six
+  Indian corridors at FL330, FL350 and FL370. 2,140 rows are labeled
+  persistent, 5,944 labeled subsaturated, and 67,516 censored, all of them
+  `sac_not_formed`. Every row carries ERA5 data, because the widened domain
+  removed the out-of-domain samples.
+- Class-wise mean probability in the metrics JSON: `mean_probability_positive`
+  and `mean_probability_negative` next to the Brier score, so a near-zero Brier
+  on a rare event is read next to the two class means.
+- `--min-val-positive` on `stratum train` to set the persistent-row floor of
+  the validation block.
 - Documentation set: README and `docs/architecture.md`, `docs/physics.md`,
   `docs/model.md`, `docs/data.md`, `docs/decisions.md`, `docs/backlog.md`, and
   this changelog.
 - Real evidence: ERA5 physics labels, corridor HTML/JSON, vertical profile JSON,
-  and the GOES-16 scene detection with preview image.
-- Tests expanded from 120 to 269 collected cases.
+  the seven-day training metrics JSON, and the GOES-16 scene detection with
+  preview image.
+- Tests expanded from 120 to 271 collected cases.
 
 ### Fixed
 
@@ -66,6 +81,10 @@ semantic versioning.
   sentinel 429 is reported as the window limit rather than a retry time.
 - The CDS fetch probes the host before queueing, so an unreachable Climate Data
   Store fails fast instead of retrying for hours.
+- ERA5 interpolation selects the two bracketing hours before interpolating the
+  space dimensions, so a query costs the same on a one-week file as on a
+  one-day one: 4 ms against 1.2 s per call on the seven-day extract, with the
+  result unchanged to 1e-14 and the same NaN pattern outside the time range.
 
 ### Changed
 
@@ -75,6 +94,15 @@ semantic versioning.
   schema.
 - The ERA5 operating domain widened to 5-40 N and 60-95 E, matching the
   seven-day extract that now covers every Indian airport in the route set.
+- The validation split is now the last contiguous block of time steps carrying
+  enough labeled and persistent rows, instead of a blind time-ordered tail.
+  Contrail formation is synoptic, and the last 106 time steps of the seven-day
+  week hold no persistent row at all, so a tail split produced a validation set
+  with no positive example to score. The command exits 1 and names the two
+  counts it needs when no trailing block qualifies.
+- The model artifact of record is now `models/era5-physics-2025-01-01_07d.joblib`,
+  trained on `data/labels_physics_2025-01-01_07d.csv`. The corridor and vertical
+  profile reports were regenerated with it.
 
 ### Removed
 

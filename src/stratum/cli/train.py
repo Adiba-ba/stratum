@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 import warnings
 from datetime import datetime, timezone
@@ -346,11 +347,11 @@ def train(argv: list[str]) -> int:
     # A blind time-ordered tail can hold almost no labeled rows when the
     # physics censors most of the period: contrail formation is
     # synoptic, so a cold spell leaves whole days without a single
-    # labeled sample. The validation block is therefore the last
-    # contiguous stretch of time steps that carries enough labeled rows
-    # and at least a few persistent ones, and training uses the rows
-    # strictly before it. No later row ever enters training, so the
-    # split stays free of time leakage.
+    # labeled sample. The validation block starts as the last
+    # ``--val-fraction`` of the rows in time order and grows backwards
+    # until it carries enough labeled and persistent rows. Training uses
+    # the rows strictly before the block, so no later row ever enters
+    # training and the split stays free of time leakage.
     unique_times = np.unique(times[order])
     labeled_by_time = np.array(
         [int(np.isfinite(labels[order[times[order] == value]]).sum()) for value in unique_times]
@@ -361,18 +362,29 @@ def train(argv: list[str]) -> int:
     suffix_labeled = 0
     suffix_positive = 0
     val_start = len(unique_times)
+    n_steps = len(unique_times)
+    min_block_steps = max(1, int(math.ceil(args.val_fraction * n_steps)))
+    max_block_steps = max(n_steps - 1, min_block_steps)
     for position in range(len(unique_times) - 1, -1, -1):
         suffix_labeled += int(labeled_by_time[position])
         suffix_positive += int(positive_by_time[position])
-        if suffix_labeled >= min_val_labeled and suffix_positive >= min_val_positive:
+        block_steps = len(unique_times) - position
+        if (
+            suffix_labeled >= min_val_labeled
+            and suffix_positive >= min_val_positive
+            and block_steps >= min_block_steps
+        ):
             val_start = position
             break
     if val_start >= len(unique_times):
         print(
             f"ERROR: no trailing block of time steps carries both "
             f"{min_val_labeled} labeled and {min_val_positive} persistent "
-            f"rows; the dataset has {int(np.isfinite(labels).sum())} labeled "
-            f"and {int((labels == 1.0).sum())} persistent rows in total. "
+            f"rows within the {max_block_steps}-step limit "
+            f"(at least {min_block_steps} steps, that is "
+            f"{args.val_fraction:.2f} of the time span). The dataset has "
+            f"{int(np.isfinite(labels).sum())} labeled and "
+            f"{int((labels == 1.0).sum())} persistent rows in total. "
             "Lower --min-val-positive, label a longer period, or use a "
             "dataset with more formation.",
             file=sys.stderr,

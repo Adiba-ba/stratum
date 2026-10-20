@@ -77,38 +77,44 @@ The three authenticated fetch commands read `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT
 
 ## Quickstart
 
-Run the real pipeline on the bundled ERA5 day. The label build loops over 7,200 samples; allow a few minutes.
+The full flow runs on a seven-day ERA5 extract. Step 1 needs CDS credentials; step 2 labels 75,600 samples.
 
 ```bash
-# 1. Label ERA5 profiles with the SAC + supersaturation rule (7,200 rows)
+# 1. Fetch seven days of ERA5 pressure-level fields
+stratum fetch era5 --date 2025-01-01 --days 7 \
+  --out data/cache/era5/era5_india_2025-01-01_2025-01-07.nc
+
+# 2. Label the merged extract with the SAC + supersaturation rule (75,600 rows)
 stratum build-physics-labels \
-  --era5 data/era5_del_bom_20250101.nc \
-  --routes VIDP-VABB,VIDP-VOBL,VIDP-VECC,VABB-VAAH \
+  --era5 data/cache/era5/era5_india_2025-01-01_2025-01-07.nc \
+  --routes VIDP-VABB,VIDP-VOBL,VAAH-VABB,VIDP-VECC,VABB-VECC,VIDP-VAAH \
   --levels 330,350,370 \
-  --out data/labels_physics_2025-01-01.csv
+  --out data/labels_physics_2025-01-01_07d.csv
 
-# 2. Train and calibrate the correction model
+# 3. Train and calibrate the correction model
 stratum train \
-  --dataset data/labels_physics_2025-01-01.csv \
-  --out models/era5-physics-2025-01-01.joblib
+  --dataset data/labels_physics_2025-01-01_07d.csv \
+  --out models/era5-physics-2025-01-01_07d.joblib
 
-# 3. Evaluate the Delhi to Mumbai corridor and write an HTML report
+# 4. Evaluate the Delhi to Mumbai corridor and write an HTML report
 stratum corridor \
   --era5 data/era5_del_bom_20250101.nc \
   --route VIDP-VABB --flight-level 350 \
   --departure 2025-01-01T20:00:00 \
-  --model models/era5-physics-2025-01-01.joblib \
+  --model models/era5-physics-2025-01-01_07d.joblib \
   --out reports/vidp_vabb_2025-01-01.html
 ```
 
-Observed result of step 1: 7,200 rows, 256 labeled persistent, 1,596 labeled subsaturated, 5,348 censored (4,124 `sac_not_formed`, 1,224 `data_unavailable`); 5,976 rows carry ERA5 data. Result of step 2: validation Brier score 0.00345 raw and 0.00173 calibrated, measured on the 579 labeled rows of the 2,160-row validation split. Result of step 3: 25 segments, 11 SAC-forming, 6 predicted persistent, 6 flagged, one advisory event (descent FL350 to FL330 from segment 4) with +8.97 kg fuel, +28.35 kg CO2, 660.17 GJ avoided contrail energy forcing, benefit-to-cost ratio 60.54.
+Observed result of step 2: 75,600 rows over 168 hourly steps from 2025-01-01 to 2025-01-07, six routes at FL330, FL350 and FL370; 2,140 rows labeled persistent, 5,944 labeled subsaturated, 67,516 censored, all `sac_not_formed`. Every row carries ERA5 data, because the widened domain removed the out-of-domain samples. Result of step 3: 26,550 training rows with 6,881 labels, 49,050 validation rows with 1,203 labels (24 persistent, 1,179 subsaturated); Brier score 2.41e-14 raw and 0.0 calibrated, mean calibrated probability 1.0 on the persistent rows and 0.0 on the subsaturated rows; training envelope 21,663..26,201 Pa, i.e. FL330, FL350 and FL370. Result of step 4: 25 segments, 11 SAC-forming, 6 predicted persistent, 6 flagged, one advisory event (descent FL350 to FL330 from segment 4) with +8.97 kg fuel, +28.35 kg CO2, 660.17 GJ avoided contrail energy forcing, benefit-to-cost ratio 60.54.
+
+Bundled single-day sample. `data/era5_del_bom_20250101.nc` covers one corridor day, `data/labels_physics_2025-01-01.csv` holds its 7,200 rows (256 persistent, 1,596 subsaturated, 5,348 censored), and `models/era5-physics-2025-01-01.joblib` is trained on that file with a validation Brier of 0.00345 raw and 0.00173 calibrated on 579 labeled validation rows. Steps 2 to 4 run on it by pointing `--era5` at the bundled day and `--dataset` at the single-day CSV.
 
 Per-level dispatch view for the same departure. `stratum profile` samples every requested level at every waypoint, flags each level against the model's training envelope, and recommends the lowest-risk level inside it:
 
 ```bash
 stratum profile \
   --era5 data/era5_del_bom_20250101.nc \
-  --model models/era5-physics-2025-01-01.joblib \
+  --model models/era5-physics-2025-01-01_07d.joblib \
   --route VIDP-VABB --levels 290,310,330,350,370,390 \
   --out reports/vidp_vabb_profile_2025-01-01.json
 ```
@@ -117,14 +123,14 @@ Observed result: 25 waypoints, recommended FL330 at 6 waypoints and FL350 at 19,
 
 ## Data inputs
 
-- ERA5 reanalysis: `temperature`, `specific_humidity`, `u_component_of_wind`, `v_component_of_wind`, `vertical_velocity`, `fraction_of_cloud_cover` on pressure levels. The bundled file `data/era5_del_bom_20250101.nc` covers 15-32 N, 68-82 E, 200-400 hPa, 24 hourly steps on 2025-01-01 (6.6 MB). `stratum fetch era5` pulls a wider extract: 5-40 N, 60-95 E, hourly, one file per day under `data/cache/era5/`, and the operating domain follows that area.
+- ERA5 reanalysis: `temperature`, `specific_humidity`, `u_component_of_wind`, `v_component_of_wind`, `vertical_velocity`, `fraction_of_cloud_cover` on pressure levels. The bundled file `data/era5_del_bom_20250101.nc` covers 15-32 N, 68-82 E, 200-400 hPa, 24 hourly steps on 2025-01-01 (6.6 MB). `stratum fetch era5` pulls a wider extract: 5-40 N, 60-95 E, hourly, `--days` days per request (default 7), written under `data/cache/era5/`, and the operating domain follows that area.
 - ADS-B trajectories: canonical OpenSky/ADS-B Exchange schema. The CLI takes trajectories from CSV, or generates great-circle route profiles when no ADS-B file is supplied. `stratum fetch adsb-history` writes that CSV from OpenSky flight tracks; the track endpoint serves the last 30 days only, and ground speed and vertical rate are derived from consecutive fixes because the endpoint reports neither.
 - Satellite scenes: GOES-16 ABI L2 CMI bands 14 and 15 in `data/cache/goes16/`, plus SEVIRI IR_108/IR_120/IR_087 support for the Indian domain through EUMETSAT. `stratum fetch seviri` downloads the MSG Level 1.5 granule; the account has to accept the Data Store General Licence once, and the native HRIT files still need conversion to NetCDF for `detect-scene`.
 - Open-Meteo forecast: used only by `stratum check-live` for the built-in RJAA to RJBB track.
 
 ## Status and limitations
 
-- The bundled ERA5 file is one day over one Indian subdomain. The shipped model is trained on 7,200 rows from that day: 1,852 carry labels (256 persistent, 1,596 subsaturated) and 5,348 are censored (4,124 `sac_not_formed`, 1,224 `data_unavailable`). Metrics on this set measure plumbing, not global skill. The physics labels are a reanalysis surrogate: the SAC and ice-supersaturation rule applied to ERA5 fields, not observed contrails.
+- The shipped model is trained on the seven-day extract, `data/labels_physics_2025-01-01_07d.csv`: 75,600 rows over 168 hourly steps, 8,084 labeled (2,140 persistent, 5,944 subsaturated) and 67,516 censored (all `sac_not_formed`). The near-zero Brier score reflects a physics surrogate that reproduces the Schmidt-Appleman rule on held-out time, not skill against observed contrails. The validation block is the last contiguous stretch of time steps carrying enough labeled and persistent rows, because formation is synoptic and a blind tail split was degenerate. Metrics on this set measure plumbing, not global skill.
 - Real-satellite evidence: `stratum detect-scene` on the bundled GOES-16 ABI L2 CMI bands C14/C15 for 2025-01-01 20:00 UTC over the western North Atlantic finds 94 raw line objects, 68 of which georeference inside the 55N..40N / 70W..30W analysis box; the run is `reports/scene_goes16_20250101_2000/summary.json` with a preview in `reports/scene_goes16_20250101_2000/scene.png`. The scene proves the detection and georeferencing path only; no labels were derived from it.
 - Fuel penalties are engineering defaults: +2.0% per 2,000 ft climb and +1.15% per 2,000 ft descent on a 20-minute window, with nominal cruise burn per aircraft type. They aren't operator data.
 - The decision layer compares an Earth-mean flux: avoided contrail energy forcing divided by Earth surface area against CO2 cost through the 20-year CO2 AGWP. It's an audit-grade cost-benefit proxy, not a certified climate metric.

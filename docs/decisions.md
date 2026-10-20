@@ -60,7 +60,7 @@ stratum corridor \
   --era5 data/era5_del_bom_20250101.nc \
   --route VIDP-VABB --flight-level 350 \
   --departure 2025-01-01T20:00:00 \
-  --model models/era5-physics-2025-01-01.joblib \
+  --model models/era5-physics-2025-01-01_07d.joblib \
   --out reports/vidp_vabb_2025-01-01.html
 ```
 
@@ -99,7 +99,7 @@ Reported totals: `total_extra_fuel_kg` 8.97, `total_extra_co2_kg` 28.3452, `tota
 ```bash
 stratum profile \
   --era5 data/era5_del_bom_20250101.nc \
-  --model models/era5-physics-2025-01-01.joblib \
+  --model models/era5-physics-2025-01-01_07d.joblib \
   --route VIDP-VABB --levels 290,310,330,350,370,390
 ```
 
