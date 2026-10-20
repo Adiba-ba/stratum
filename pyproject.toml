@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 data = [
     "cdsapi>=0.7",
+    "eumdac>=3.1.1",
 ]
 figures = [
     "matplotlib>=3.8",

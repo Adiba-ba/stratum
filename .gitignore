@@ -18,3 +18,10 @@ dist/
 
 # macOS
 .DS_Store
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+.cdsapirc
+credentials*
