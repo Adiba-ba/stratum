@@ -273,21 +273,48 @@ def interpolate_met_to_segment(
     ]
     if auxiliary_coordinates:
         subset = subset.drop_vars(auxiliary_coordinates)
-    point = subset.interp(
-        {
-            latitude_name: float(lat),
-            longitude_name: float(lon),
-            level_name: pressure_pa / 100.0,
-            time_name: _to_nanosecond_utc(time_dt),
-        }
-    )
 
-    values: dict[str, float] = {}
-    for name in available:
-        scalar = point[name].squeeze()
-        if scalar.ndim > 0:
-            # Collapse auxiliary dimensions (e.g. ERA5 ``expver``) by
-            # taking the first index; documented schema has none.
-            scalar = scalar.isel({dim: 0 for dim in scalar.dims})
-        values[name] = float(scalar.values)
-    return values
+    # Interpolating the whole time axis for every query costs the same
+    # work for a one-day and a one-week extract, so the two bracketing
+    # hours are selected first and the space interpolation runs on those
+    # slices only. The result matches a full four-dimensional
+    # interpolation, including NaN outside the time range.
+    times = np.asarray(subset[time_name].values).astype("datetime64[ns]")
+    target_ns = np.datetime64(int(_to_nanosecond_utc(time_dt)), "ns")
+    if target_ns < times[0] or target_ns > times[-1]:
+        return {name: float("nan") for name in available}
+
+    upper = int(np.searchsorted(times, target_ns, side="left"))
+    if upper >= times.size:
+        upper = times.size - 1
+    lower = upper - 1 if times[upper] != target_ns else upper
+
+    def _slice_values(index: int) -> dict[str, float]:
+        one = subset.isel({time_name: index})
+        point = one.interp(
+            {
+                latitude_name: float(lat),
+                longitude_name: float(lon),
+                level_name: pressure_pa / 100.0,
+            }
+        )
+        values_at_time: dict[str, float] = {}
+        for name in available:
+            scalar = point[name].squeeze()
+            if scalar.ndim > 0:
+                # Collapse auxiliary dimensions (e.g. ERA5 ``expver``) by
+                # taking the first index; documented schema has none.
+                scalar = scalar.isel({dim: 0 for dim in scalar.dims})
+            values_at_time[name] = float(scalar.values)
+        return values_at_time
+
+    lower_values = _slice_values(lower)
+    if lower == upper:
+        return lower_values
+    upper_values = _slice_values(upper)
+    span = float((times[upper] - times[lower]) / np.timedelta64(1, "ns"))
+    weight = float((target_ns - times[lower]) / np.timedelta64(1, "ns")) / span
+    return {
+        name: (1.0 - weight) * lower_values[name] + weight * upper_values[name]
+        for name in available
+    }

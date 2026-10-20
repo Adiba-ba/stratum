@@ -523,3 +523,46 @@ def test_crop_to_domain_rejects_malformed_bbox() -> None:
             np.array([1.0, 2.0]),
             (0.0, 0.0, 1.0, 1.0),
         )
+
+
+def test_interpolation_is_linear_in_time_between_hours() -> None:
+    """The fast path must match a linear blend of the bracketing hours."""
+    dataset = _synthetic_era5()
+    hours = dataset["time"].values
+    first = float(dataset["temperature"].isel(time=0).values[0, 0, 0])
+    second = float(dataset["temperature"].isel(time=1).values[0, 0, 0])
+    point = (
+        float(dataset.latitude.values[0]),
+        float(dataset.longitude.values[0]),
+        float(dataset.level.values[0]) * 100.0,
+    )
+    at_first = interpolate_met_to_segment(
+        dataset, point[0], point[1], point[2], pd.Timestamp(hours[0])
+    )
+    halfway = interpolate_met_to_segment(
+        dataset,
+        point[0],
+        point[1],
+        point[2],
+        pd.Timestamp(hours[0]) + pd.Timedelta(hours=3),
+    )
+    assert at_first["temperature"] == pytest.approx(first, rel=1e-9)
+    assert halfway["temperature"] == pytest.approx(0.5 * (first + second), rel=1e-9)
+
+
+def test_interpolation_outside_the_time_range_is_nan() -> None:
+    dataset = _synthetic_era5()
+    hours = dataset["time"].values
+    point = (
+        float(dataset.latitude.values[0]),
+        float(dataset.longitude.values[0]),
+        float(dataset.level.values[0]) * 100.0,
+    )
+    before = interpolate_met_to_segment(
+        dataset, point[0], point[1], point[2], pd.Timestamp(hours[0]) - pd.Timedelta(hours=1)
+    )
+    after = interpolate_met_to_segment(
+        dataset, point[0], point[1], point[2], pd.Timestamp(hours[-1]) + pd.Timedelta(hours=1)
+    )
+    assert all(math.isnan(value) for value in before.values())
+    assert all(math.isnan(value) for value in after.values())
