@@ -134,3 +134,4 @@ The 0.40 gate is the activation threshold; the 0.50 count is a reporting statist
 - Isotonic calibration is piecewise constant, so probabilities saturate in ranges with few labeled points.
 - The monotone checks in the metrics file cover `rhi` and `tlm_k` only; the other three constrained features are enforced by LightGBM but not re-verified per training run.
 - Feature defaults (`richardson_number = 1.0`, `solar_zenith_deg = 100.0`) apply when a diagnostic can't be computed; those rows are still trainable, which softens the affected constraint.
+- The observed-label path hasn't produced cruise-level labels end to end: the cached SEVIRI granule is a 0-byte zip and the cached India ADS-B track tops out at 25,000 ft. The shipped model is trained only on ERA5 physics labels.

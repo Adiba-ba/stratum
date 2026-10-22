@@ -2,7 +2,7 @@
 
 The ingestion layer targets the Indian subdomain used by the pipeline:
 
-- bounding box ``(North, West, South, East) = (32.0, 68.0, 15.0, 82.0)``,
+- bounding box ``(North, West, South, East) = (40.0, 60.0, 5.0, 95.0)``,
 - pressure levels ``[200, 225, 250, 300, 350, 400]`` hPa,
 - the six meteorological variables required by the correction model.
 
@@ -169,7 +169,7 @@ def is_in_domain(lat_deg: float, lon_deg: float, pressure_pa: float) -> bool:
     (``20000.0`` to ``40000.0`` Pa). All bounds are inclusive, with an
     absolute tolerance to absorb floating-point representation error:
     ``1e-6`` deg for position and ``1e-3`` Pa for pressure. A value
-    exactly on a bound (e.g. ``lat_deg=32.0`` or ``pressure_pa=40000.0``)
+    exactly on a bound (e.g. ``lat_deg=40.0`` or ``pressure_pa=40000.0``)
     counts as inside; a value more than one tolerance outside does not.
     Non-finite inputs are outside.
 

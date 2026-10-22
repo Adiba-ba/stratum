@@ -148,3 +148,19 @@ def test_vidp_vecc_winter_persistence_above_40pct() -> None:
     assert result["persistence_pct"] > 40.0
     assert result["formation_count"] >= result["persistence_count"]
     assert result["total_waypoints"] == NUM_POINTS
+
+
+def test_route_profile_accepts_zero_rhi() -> None:
+    """An all-zero RHi profile is evaluated instead of crashing."""
+    waypoints = corridor.great_circle_waypoints(
+        corridor.AIRPORTS["VIDP"], corridor.AIRPORTS["VABB"], fl=340
+    )
+    temps = corridor.piecewise_profile(((0.0, -56.0), (1.0, -51.0)), NUM_POINTS)
+    rhi_values = [0.0] * NUM_POINTS
+
+    result = corridor.evaluate_route_profile(waypoints, temps, rhi_values)
+
+    assert result["total_waypoints"] == NUM_POINTS
+    assert result["persistence_count"] == 0
+    for detail in result["details"]:
+        assert math.isfinite(float(detail["TLC_C"]))
