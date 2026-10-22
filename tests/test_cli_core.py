@@ -223,7 +223,14 @@ def test_train_writes_artifact_and_metrics(
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = train_cli.train(
-            ["--dataset", str(physics_dataset.labels), "--out", str(artifact)]
+            [
+                "--dataset",
+                str(physics_dataset.labels),
+                "--out",
+                str(artifact),
+                "--min-train-rows",
+                "40",
+            ]
         )
     assert code == 0, buffer.getvalue()
     assert artifact.is_file()
@@ -265,6 +272,8 @@ def test_train_writes_artifact_and_metrics(
         metrics["n_calibration_positive"] + metrics["n_calibration_negative"]
         == metrics["n_calibration_labeled"]
     )
+    assert metrics["n_calibration_positive"] > 0
+    assert metrics["n_calibration_negative"] > 0
     training = payload["training"]
     assert training["calibration_fraction"] == pytest.approx(0.2)
     assert training["n_train_fit"] == metrics["n_train_fit"]
@@ -294,6 +303,26 @@ def test_train_writes_artifact_and_metrics(
     assert metadata["training_envelope"] == envelope
     assert metadata["metrics"]["brier_calibrated"] == metrics["brier_calibrated"]
     assert "rhi PASS | tlm_k PASS" in buffer.getvalue()
+
+
+def test_train_rejects_single_class_calibration(
+    physics_dataset: PhysicsDataset, tmp_path: Path
+) -> None:
+    """A calibration slice with one outcome must not collapse the map."""
+    frame = pd.read_csv(physics_dataset.labels)
+    frame["label"] = 1.0
+    dataset = tmp_path / "one_class.csv"
+    frame.to_csv(dataset, index=False)
+
+    artifact = tmp_path / "model.joblib"
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        code = train_cli.train(
+            ["--dataset", str(dataset), "--out", str(artifact)]
+        )
+    assert code == 1
+    assert not artifact.exists()
+    assert "calibration slice holds only one label class" in stderr.getvalue()
 
 
 def test_train_single_time_step_uses_row_order_split(
@@ -552,7 +581,14 @@ def test_validation_block_holds_later_times_than_training(
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = train_cli.train(
-            ["--dataset", str(physics_dataset.labels), "--out", str(artifact)]
+            [
+                "--dataset",
+                str(physics_dataset.labels),
+                "--out",
+                str(artifact),
+                "--min-train-rows",
+                "40",
+            ]
         )
     assert code == 0, buffer.getvalue()
     payload = json.loads(

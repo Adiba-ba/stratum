@@ -148,6 +148,13 @@ def _mean_probability(probabilities: np.ndarray, mask: np.ndarray) -> float:
     return float(np.mean(selected))
 
 
+def _has_both_label_classes(labels: np.ndarray) -> bool:
+    """Return whether a slice holds at least one persistent and one not."""
+    finite = np.asarray(labels, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return bool((finite == 1.0).any() and (finite == 0.0).any())
+
+
 def _time_bounds(times: pd.DatetimeIndex, idx: np.ndarray) -> tuple[str, str]:
     """ISO-8601 UTC bounds of the provenance times selected by ``idx``."""
     selected = times[np.asarray(idx, dtype=int)]
@@ -523,21 +530,24 @@ def train(argv: list[str]) -> int:
         )
         calibration_steps = min(calibration_steps, n_train_steps - 1)
         calibration_start = n_train_steps - calibration_steps
-        # A whole calibration time step can be unobservable (NaN labels).
-        # Grow the slice backwards one step at a time, but never consume
-        # the last fit time step.
-        while calibration_start > 1:
-            calibration_times = set(train_times[calibration_start:])
-            calibration_mask = np.array(
-                [value in calibration_times for value in times[train_idx]]
-            )
-            if bool(np.isfinite(labels[train_idx[calibration_mask]]).any()):
-                break
-            calibration_start -= 1
+        # A whole calibration time step can be unobservable (NaN labels) or
+        # contain only one outcome. Grow the slice backwards one step at a
+        # time until it holds both classes, but never consume the last fit
+        # time step: isotonic regression fitted to a single class collapses
+        # every score to that class and is worse than no calibration.
         calibration_times = set(train_times[calibration_start:])
         calibration_mask = np.array(
             [value in calibration_times for value in times[train_idx]]
         )
+        while (
+            calibration_start > 1
+            and not _has_both_label_classes(labels[train_idx[calibration_mask]])
+        ):
+            calibration_start -= 1
+            calibration_times = set(train_times[calibration_start:])
+            calibration_mask = np.array(
+                [value in calibration_times for value in times[train_idx]]
+            )
         fit_idx = np.asarray(train_idx[~calibration_mask], dtype=int)
         calibration_idx = np.asarray(train_idx[calibration_mask], dtype=int)
     else:
@@ -549,7 +559,7 @@ def train(argv: list[str]) -> int:
         calibration_start = int(train_idx.size) - n_calibration
         while (
             calibration_start > 1
-            and not np.isfinite(labels[train_idx[calibration_start:]]).any()
+            and not _has_both_label_classes(labels[train_idx[calibration_start:]])
         ):
             calibration_start -= 1
         fit_idx = np.asarray(train_idx[:calibration_start], dtype=int)
@@ -571,6 +581,17 @@ def train(argv: list[str]) -> int:
     n_fit_labeled = int(fit_labeled.sum())
     n_calibration_positive = int((calibration_labels == 1.0).sum())
     n_calibration_negative = int((calibration_labels == 0.0).sum())
+    if n_calibration_positive == 0 or n_calibration_negative == 0:
+        print(
+            "ERROR: the calibration slice holds only one label class "
+            f"({n_calibration_positive} persistent, {n_calibration_negative} "
+            "subsaturated). Isotonic regression needs both outcomes; a "
+            "single-class slice collapses every calibrated probability to "
+            "that class. Add labels from the missing class or extend the "
+            "dataset.",
+            file=sys.stderr,
+        )
+        return 1
     if n_fit_labeled < args.min_train_rows:
         print(
             f"ERROR: only {n_fit_labeled} labeled row(s) remain in the fit "
