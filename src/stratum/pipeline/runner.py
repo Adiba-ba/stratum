@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from stratum.decide.climate import calculate_net_climate_benefit
 from stratum.decide.counterfactual import (
     ABSTAIN_THRESHOLD,
     DEFAULT_SEGMENT_LENGTH_KM,
@@ -71,6 +72,7 @@ def evaluate_corridor_flight(
     ds_met: xr.Dataset,
     model: CalibratedModel,
     aircraft_type: str = "A320",
+    pressure_envelope: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """Evaluate one flight corridor end to end.
 
@@ -86,6 +88,11 @@ def evaluate_corridor_flight(
         ``predict_proba(X) -> (N, 2)``.
     aircraft_type : str, optional
         Aircraft type for the fuel penalty model, by default ``"A320"``.
+    pressure_envelope : tuple of float, optional
+        ``(min_pa, max_pa)`` ambient pressure range covered by the model
+        training rows, by default ``None`` (unknown). It is passed to every
+        per-segment decision so a target level outside the training data
+        is rejected as an extrapolation.
 
     Returns
     -------
@@ -95,27 +102,32 @@ def evaluate_corridor_flight(
         - ``total_segments`` : number of trajectory points evaluated;
         - ``contrail_forming_segments`` : segments where the SAC criterion
           is satisfied (physics);
-        - ``contrail_persistent_segments`` : segments with calibrated
-          ``P(persist) >= 0.50``;
+        - ``contrail_persistent_segments`` : SAC-forming segments with
+          ERA5 data and calibrated ``P(persist) >= 0.50``; a high
+          probability on a segment where no contrail can form does not
+          count;
         - ``out_of_domain_segments`` : segments whose ERA5 data is
           unavailable (outside the ingestion domain, or interpolation
           gaps); they never receive a decision and never enter an event;
         - ``total_avoidable_warming_j`` : avoided contrail effective
           forcing summed over reroute events [J];
         - ``recommended_reroutes`` : one structured advisory per
-          contiguous flagged run (level change, the real segment length
-          used for the avoided-forcing accounting, fuel/CO2 delta,
-          avoided warming, benefit-to-cost ratio);
+          contiguous flagged run (level change, event length and
+          length-weighted ``p_persist``, fuel/CO2 delta of the single
+          maneuver, avoided warming of every segment in the event,
+          benefit-to-cost ratio recomputed from that event forcing);
         - ``segments`` : per-segment atmospheric and decision records;
           entries carry ``status`` (``"ok"``, ``"out_of_domain"`` or
           ``"missing_met"``), ``segment_length_km`` (haversine distance
-          to the neighbouring waypoint) and a decision record only when
-          ERA5 data is available.
+          to the neighbouring waypoint), the calibrated ``p_persist`` and
+          ``sac_forms`` flags, and a decision record only when ERA5 data
+          is available and the SAC forms.
 
     Raises
     ------
     ValueError
-        Propagated from feature extraction for malformed trajectories.
+        Propagated from feature extraction for malformed trajectories or
+        from the decision layer for a malformed ``pressure_envelope``.
     """
     features, metadata = extract_features_for_trajectory(
         df_trajectory, ds_met, aircraft_type
@@ -137,16 +149,21 @@ def evaluate_corridor_flight(
         else:
             if info["sac_forms"]:
                 forming_segments += 1
-            if probability >= PERSISTENT_PROBABILITY_THRESHOLD:
-                persistent_segments += 1
+                if probability >= PERSISTENT_PROBABILITY_THRESHOLD:
+                    persistent_segments += 1
 
         decision: AltitudeDecision | None = None
-        if info["data_available"] and probability >= ABSTAIN_THRESHOLD:
+        if (
+            info["data_available"]
+            and info["sac_forms"]
+            and probability >= ABSTAIN_THRESHOLD
+        ):
             decision = evaluate_altitude_candidates(
                 probability,
                 float(info["flight_level"]),
                 aircraft_type,
                 segment_length_km=segment_lengths_km[index],
+                pressure_envelope=pressure_envelope,
             )
             decisions[index] = decision
             flagged_indices.append(index)
@@ -195,15 +212,43 @@ def evaluate_corridor_flight(
         decision = decisions[representative]
         if decision["status"] != "eligible":
             continue
+        representative_p = float(probabilities[representative])
+        representative_length_km = float(segment_lengths_km[representative])
+        event_length_km = float(
+            sum(segment_lengths_km[index] for index in group)
+        )
+        weighted_probability = float(
+            sum(
+                float(probabilities[index]) * segment_lengths_km[index]
+                for index in group
+            )
+        )
+        if len(group) == 1:
+            # Keep the single-segment accounting bit-for-bit identical.
+            event_p = representative_p
+            avoided_ef_j = float(decision["avoided_contrail_ef_j"])
+        else:
+            event_p = weighted_probability / event_length_km
+            avoided_ef_j = float(decision["avoided_contrail_ef_j"]) * (
+                weighted_probability
+                / (representative_p * representative_length_km)
+            )
+        benefit = calculate_net_climate_benefit(
+            avoided_ef_j, float(decision["delta_co2_kg"])
+        )
         reroutes.append(
             {
                 "event_index": len(reroutes),
                 "segment_index": representative,
+                "representative_segment_index": representative,
+                "representative_p_persist": representative_p,
+                "representative_segment_length_km": representative_length_km,
                 "time_utc": metadata[representative]["time_utc"],
                 "segments_in_event": len(group),
-                "p_persist": float(probabilities[representative]),
+                "p_persist": event_p,
                 "baseline_fl": float(decision["baseline_fl"]),
-                "segment_length_km": float(decision["segment_length_km"]),
+                "segment_length_km": event_length_km,
+                "event_length_km": event_length_km,
                 "recommended_fl": float(decision["recommended_fl"]),
                 "direction": (
                     "climb"
@@ -212,8 +257,10 @@ def evaluate_corridor_flight(
                 ),
                 "delta_fuel_kg": float(decision["delta_fuel_kg"]),
                 "delta_co2_kg": float(decision["delta_co2_kg"]),
-                "avoided_contrail_ef_j": float(decision["avoided_contrail_ef_j"]),
-                "benefit_to_cost_ratio": float(decision["benefit_to_cost_ratio"]),
+                "avoided_contrail_ef_j": avoided_ef_j,
+                "benefit_to_cost_ratio": float(
+                    benefit["benefit_to_cost_ratio"]
+                ),
             }
         )
 

@@ -17,6 +17,13 @@ full calibrated pipeline (:func:`evaluate_corridor_flight`) and prints the
 waypoint audit plus the dispatcher advisory. The ERA5 file is required
 either way: a missing file or a missing model artifact exits with code 2
 instead of falling back to synthetic meteorology.
+
+With ``--model`` the ``training_envelope`` recorded in the artifact
+metadata is passed to the decision layer, so a recommended level whose ISA
+pressure lies outside the range covered by the training rows is rejected as
+an extrapolation. When the baseline lies outside a known envelope the
+command warns that its probabilities extrapolate, and when the artifact
+records no usable envelope it warns that the candidates are unchecked.
 """
 
 from __future__ import annotations
@@ -36,7 +43,9 @@ import pandas as pd
 from stratum.io.adsb import load_adsb_csv, select_trajectory
 from stratum.io.era5 import load_era5_dataset
 from stratum.model.artifacts import load_model
+from stratum.model.envelope import pressure_envelope_bounds
 from stratum.model.features import FEATURE_NAMES
+from stratum.physics.thermo import fl_to_p
 from stratum.pipeline.build_features import (
     extract_features_for_point,
     extract_features_for_trajectory,
@@ -820,6 +829,27 @@ def corridor(argv: list[str]) -> int:
             )
             return 2
 
+    envelope = model_metadata.get("training_envelope")
+    pressure_envelope = pressure_envelope_bounds(envelope)
+    if model is not None:
+        if pressure_envelope is None:
+            print(
+                "WARNING: the model artifact records no usable training "
+                "envelope; candidate levels are not checked against the "
+                "training range and may extrapolate beyond the training data."
+            )
+        elif cruise_fl is not None and math.isfinite(cruise_fl):
+            baseline_pressure_pa = fl_to_p(cruise_fl) * 100.0
+            low_pa, high_pa = pressure_envelope
+            if not low_pa <= baseline_pressure_pa <= high_pa:
+                print(
+                    f"WARNING: baseline FL{cruise_fl:.0f} "
+                    f"({baseline_pressure_pa:.0f} Pa) lies outside the model "
+                    f"training envelope ({low_pa:.0f}..{high_pa:.0f} Pa); its "
+                    "calibrated persistence probabilities extrapolate beyond "
+                    "the training data."
+                )
+
     source = {
         "label": f"ECMWF ERA5 reanalysis ({args.era5.name})",
         "era5_filename": args.era5.name,
@@ -909,7 +939,11 @@ def corridor(argv: list[str]) -> int:
     )
     try:
         result = evaluate_corridor_flight(
-            trajectory, ds_met, model, aircraft_type=args.aircraft
+            trajectory,
+            ds_met,
+            model,
+            aircraft_type=args.aircraft,
+            pressure_envelope=pressure_envelope,
         )
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

@@ -16,6 +16,11 @@ Teoh et al. (2024) / contrails CoCiP inventory (see
 :data:`MEDIAN_PERSISTENT_EF_J_PER_M`) and the real segment length supplied
 by the caller in kilometres.
 
+When the model artifact records a training envelope, a candidate whose
+target flight level lies outside the covered pressure range is rejected:
+the calibrated probability extrapolates there, so the decision layer must
+not recommend it.
+
 Decision policy:
 
 - ``abstain``: probability below the 0.40 activation threshold; extra
@@ -33,6 +38,7 @@ from typing import TypedDict
 from stratum.decide.climate import calculate_net_climate_benefit
 from stratum.decide.fuel import AIRCRAFT_CRUISE_BURN_KG_S, estimate_fuel_penalty
 from stratum.physics.diagnostics import get_aircraft_params
+from stratum.physics.thermo import fl_to_p
 
 __all__ = [
     "ABSTAIN_THRESHOLD",
@@ -126,14 +132,50 @@ def _resolve_aircraft_key(aircraft_type: str) -> str:
     return "DEFAULT"
 
 
+def _validate_pressure_envelope(
+    pressure_envelope: tuple[float, float] | None,
+) -> tuple[float, float] | None:
+    """Return finite, ordered envelope bounds or validate ``None``.
+
+    Raises
+    ------
+    ValueError
+        For malformed bounds (not a pair, non-finite, or inverted). The
+        command-line callers parse artifact metadata with
+        :func:`stratum.model.envelope.pressure_envelope_bounds`, which
+        degrades malformed metadata to ``None`` before it reaches here.
+    """
+    if pressure_envelope is None:
+        return None
+    try:
+        low, high = (float(value) for value in pressure_envelope)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "pressure_envelope must be a (min_pa, max_pa) pair, got "
+            f"{pressure_envelope!r}"
+        ) from error
+    if not (math.isfinite(low) and math.isfinite(high)) or low > high:
+        raise ValueError(
+            "pressure_envelope bounds must be finite and ordered "
+            f"(min <= max), got {pressure_envelope!r}"
+        )
+    return low, high
+
+
 def _evaluate_candidate(
     baseline_p_persist: float,
     baseline_fl: float,
     delta_fl: float,
     aircraft_type: str,
     segment_length_km: float,
+    pressure_envelope: tuple[float, float] | None = None,
 ) -> CandidateEvaluation:
-    """Evaluate one +/- ``ALTITUDE_STEP_FL`` candidate against all gates."""
+    """Evaluate one +/- ``ALTITUDE_STEP_FL`` candidate against all gates.
+
+    The standard ceiling and minimum cruise gates run first; a target
+    outside ``pressure_envelope`` (the model training range) is rejected
+    after them because its probability would be an extrapolation.
+    """
     target_fl = baseline_fl + delta_fl
     change_ft = delta_fl * 100.0
     direction = "step climb" if delta_fl > 0.0 else "descent"
@@ -147,6 +189,16 @@ def _evaluate_candidate(
         rejection_reason = (
             f"target FL{target_fl:.0f} below minimum cruise FL{MIN_ALLOWED_FL:.0f}"
         )
+    elif pressure_envelope is not None:
+        target_pressure_pa = fl_to_p(target_fl) * 100.0
+        low_pa, high_pa = pressure_envelope
+        if not low_pa <= target_pressure_pa <= high_pa:
+            rejection_reason = (
+                f"target FL{target_fl:.0f} ({target_pressure_pa:.0f} Pa) is "
+                "outside the model training envelope "
+                f"({low_pa:.0f}..{high_pa:.0f} Pa); its calibrated "
+                "probability would be an extrapolation"
+            )
     if rejection_reason is not None:
         return CandidateEvaluation(
             target_fl=target_fl,
@@ -194,6 +246,7 @@ def evaluate_altitude_candidates(
     baseline_fl: float,
     aircraft_type: str = "A320",
     segment_length_km: float = DEFAULT_SEGMENT_LENGTH_KM,
+    pressure_envelope: tuple[float, float] | None = None,
 ) -> AltitudeDecision:
     """Evaluate the primary counterfactual flight levels for a segment.
 
@@ -215,6 +268,12 @@ def evaluate_altitude_candidates(
         forcing scales linearly with this length through
         :data:`MEDIAN_PERSISTENT_EF_J_PER_M` (Teoh et al. 2024 CoCiP
         inventory).
+    pressure_envelope : tuple of float, optional
+        ``(min_pa, max_pa)`` ambient pressure range covered by the model
+        training rows, by default ``None`` (unknown, so no gate). A target
+        flight level whose ISA pressure lies outside the range is rejected
+        as an extrapolation; the rejection record keeps the existing zeroed
+        fields.
 
     Returns
     -------
@@ -229,7 +288,8 @@ def evaluate_altitude_candidates(
     ------
     ValueError
         For a probability outside ``[0.0, 1.0]``, a non-positive baseline
-        flight level, or a non-positive segment length.
+        flight level, a non-positive segment length, or a malformed
+        ``pressure_envelope`` (non-finite or inverted bounds).
     """
     p_persist = float(baseline_p_persist)
     if not math.isfinite(p_persist) or not 0.0 <= p_persist <= 1.0:
@@ -243,6 +303,7 @@ def evaluate_altitude_candidates(
         raise ValueError(
             f"segment_length_km must be positive, got {segment_length_km!r}"
         )
+    envelope = _validate_pressure_envelope(pressure_envelope)
     key = _resolve_aircraft_key(aircraft_type)
 
     if p_persist < ABSTAIN_THRESHOLD:
@@ -267,10 +328,20 @@ def evaluate_altitude_candidates(
 
     candidates = [
         _evaluate_candidate(
-            p_persist, baseline_fl, +ALTITUDE_STEP_FL, key, segment_length_km
+            p_persist,
+            baseline_fl,
+            +ALTITUDE_STEP_FL,
+            key,
+            segment_length_km,
+            envelope,
         ),
         _evaluate_candidate(
-            p_persist, baseline_fl, -ALTITUDE_STEP_FL, key, segment_length_km
+            p_persist,
+            baseline_fl,
+            -ALTITUDE_STEP_FL,
+            key,
+            segment_length_km,
+            envelope,
         ),
     ]
     eligible = [

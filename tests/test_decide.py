@@ -22,6 +22,8 @@ from stratum.decide.counterfactual import (
     DEFAULT_SEGMENT_LENGTH_KM,
     MEDIAN_PERSISTENT_EF_J_PER_M,
 )
+from stratum.model.envelope import pressure_envelope_bounds
+from stratum.physics import fl_to_p
 
 WINDOW_SECONDS = 20.0 * 60.0
 CRUISE_BURN_KG_S = 0.65
@@ -352,6 +354,92 @@ def test_descent_below_minimum_rejected() -> None:
     assert descent["rejection_reason"] is not None
     assert decision["recommended_fl"] == pytest.approx(290.0)
     assert decision["recommended_fl"] > decision["baseline_fl"]
+
+
+def test_training_envelope_rejects_climb_out_of_envelope() -> None:
+    envelope = (21663.0, 26201.0)
+    decision = evaluate_altitude_candidates(
+        baseline_p_persist=0.90,
+        baseline_fl=370.0,
+        pressure_envelope=envelope,
+    )
+    climb, descent = decision["candidates"]
+
+    # The climb to FL390 extrapolates beyond the FL370 top of the training
+    # data, so it is rejected even though it would escape more forcing.
+    assert climb["target_fl"] == pytest.approx(390.0)
+    assert climb["rejected"] is True
+    assert climb["rejection_reason"] is not None
+    assert "training envelope" in climb["rejection_reason"]
+    target_pressure_pa = fl_to_p(390.0) * 100.0
+    assert f"{target_pressure_pa:.0f} Pa" in climb["rejection_reason"]
+    assert "21663..26201 Pa" in climb["rejection_reason"]
+    assert climb["delta_fuel_kg"] == pytest.approx(0.0)
+    assert climb["delta_co2_kg"] == pytest.approx(0.0)
+    assert climb["avoided_ef_j"] == pytest.approx(0.0)
+    assert climb["benefit_to_cost_ratio"] == pytest.approx(0.0)
+    assert climb["net_benefit_positive"] is False
+
+    # The descent stays inside the envelope and remains eligible.
+    assert descent["target_fl"] == pytest.approx(350.0)
+    assert descent["rejected"] is False
+    assert decision["status"] == "eligible"
+    assert decision["recommended_fl"] == pytest.approx(350.0)
+
+
+def test_training_envelope_does_not_recommend_out_of_envelope_level() -> None:
+    decision = evaluate_altitude_candidates(
+        baseline_p_persist=0.90,
+        baseline_fl=390.0,
+        pressure_envelope=(21663.0, 26201.0),
+    )
+    # FL410 is above the standard ceiling; the descent to FL370 stays inside
+    # the envelope, but FL390 (the flown level) can never be recommended.
+    assert decision["status"] == "eligible"
+    assert decision["recommended_fl"] == pytest.approx(370.0)
+    assert decision["recommended_fl"] != pytest.approx(390.0)
+    assert decision["candidates"][0]["rejected"] is True
+    assert decision["candidates"][1]["rejected"] is False
+
+
+def test_pressure_envelope_bounds_degrades_malformed_metadata() -> None:
+    assert pressure_envelope_bounds(None) is None
+    assert pressure_envelope_bounds({}) is None
+    assert pressure_envelope_bounds({"pressure_pa_min": 1.0}) is None
+    assert (
+        pressure_envelope_bounds(
+            {"pressure_pa_min": 2.0, "pressure_pa_max": 1.0}
+        )
+        is None
+    )
+    assert (
+        pressure_envelope_bounds(
+            {"pressure_pa_min": float("nan"), "pressure_pa_max": 1.0}
+        )
+        is None
+    )
+    assert (
+        pressure_envelope_bounds(
+            {"pressure_pa_min": 1.0, "pressure_pa_max": float("inf")}
+        )
+        is None
+    )
+    assert pressure_envelope_bounds((21663.0, 26201.0)) is None
+    assert pressure_envelope_bounds(
+        {"pressure_pa_min": 21663.0, "pressure_pa_max": 26201.0}
+    ) == (21663.0, 26201.0)
+
+
+def test_decision_rejects_malformed_pressure_envelope() -> None:
+    for envelope in (
+        (2.0, 1.0),
+        (float("nan"), 1.0),
+        (1.0, float("inf")),
+    ):
+        with pytest.raises(ValueError):
+            evaluate_altitude_candidates(
+                0.85, 350.0, pressure_envelope=envelope
+            )
 
 
 def test_activation_threshold_boundary_is_evaluated() -> None:
