@@ -36,7 +36,7 @@ rhw = rhi * e_i(T) / e_w(T)
 
 `evaluate_sac` returns `forms = T_K < T_LC` and `persists = rhi > 1.0`, plus `TLM_C`, `TLC_C`, and `G`.
 
-Pipeline use (`stratum/pipeline/build_features.py`): the thresholds are solved with the aircraft propulsion efficiency from the engine registry, for example `eta = 0.32` for A320. But the legacy `q_fuel = 43.2e6` J/kg and `ei_h2o = 1.23` kg/kg. `rhw` is floored at `1.0e-9` before `T_LC` is solved.
+Pipeline use (`stratum/pipeline/build_features.py`): the thresholds are solved with the aircraft propulsion efficiency from the engine registry, for example `eta = 0.32` for A320. But the legacy `q_fuel = 43.2e6` J/kg and `ei_h2o = 1.23` kg/kg. The feature builder floors `rhw` at `1.0e-9` before `T_LC` is solved; `critical_T` itself also accepts exactly zero, which is what the route-profile evaluator passes when `RHi = 0`.
 
 ## Saturation curves and ISA
 
