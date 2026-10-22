@@ -192,14 +192,14 @@
       </div>
       <div class="advisory-cell">
         <div class="advisory-label">Avoided warming</div>
-        <div class="advisory-value mono">660.17 GJ</div>
+        <div class="advisory-value mono">3961.02 GJ</div>
       </div>
       <div class="advisory-cell">
         <div class="advisory-label">Benefit / cost ratio</div>
-        <div class="advisory-value mono">6.05e+01</div>
+        <div class="advisory-value mono">3.63e+02</div>
       </div>
     </div>
-    <p class="advisory-note">Descending to FL330 is the cheapest feasible maneuver (+8.97 kg Jet-A over the 20-minute window) and clears the highest benefit-to-cost ratio (6.05e+01) of every evaluated level. ERA5 probe over the 25 flagged waypoints: mean RHi 0.63 at FL350 versus 0.60 at FL330; the step descent dries the air on 19 of 25 waypoints and leaves ice-subsaturated air (RHi &#60; 1.0) at the proposed level on 20 of 25, so the escape is partial in this weather sample and the calibrated persistence probability plus the modeled escape effectiveness drive the recommendation.</p>
+    <p class="advisory-note">Descending to FL330 is the cheapest feasible maneuver (+8.97 kg Jet-A over the 20-minute window) and clears the highest benefit-to-cost ratio (3.63e+02) of every evaluated level. ERA5 probe over the 25 flagged waypoints: mean RHi 0.63 at FL350 versus 0.60 at FL330; the step descent dries the air on 19 of 25 waypoints and leaves ice-subsaturated air (RHi &#60; 1.0) at the proposed level on 20 of 25, so the escape is partial in this weather sample and the calibrated persistence probability plus the modeled escape effectiveness drive the recommendation.</p>
   </section>
 
   <h2 class="section">Altitude candidate evaluation matrix</h2>
@@ -215,10 +215,10 @@
       </tr>
     </thead>
     <tbody>
-      <tr><td class="mono">FL370</td><td class="num">+2000 ft</td><td class="num">+15.60 kg</td><td class="num">+49.30 kg</td><td class="num">701.43 GJ</td><td class="rationale">REJECTED &#8212; lower benefit/cost (3.70e+01) than the recommended FL330</td></tr>
+      <tr><td class="mono">FL370</td><td class="num">+2000 ft</td><td class="num">+15.60 kg</td><td class="num">+49.30 kg</td><td class="num">4208.59 GJ</td><td class="rationale">REJECTED &#8212; lower benefit/cost (2.22e+02) than the recommended FL330</td></tr>
 <tr><td class="mono">FL350</td><td class="num">0 ft</td><td class="num">0.00 kg</td><td class="num">0.00 kg</td><td class="num">&#8212;</td><td class="rationale">CURRENT &#8212; persistent contrail flagged (P(persist) 1.00)</td></tr>
-<tr><td class="mono">FL330</td><td class="num">-2000 ft</td><td class="num">+8.97 kg</td><td class="num">+28.35 kg</td><td class="num">660.17 GJ</td><td class="rationale">SELECTED &#8212; descent to FL330; +8.97 kg Jet-A; highest benefit/cost (6.05e+01)</td></tr>
-<tr><td class="mono">FL310</td><td class="num">-4000 ft</td><td class="num">+17.94 kg</td><td class="num">+56.69 kg</td><td class="num">660.17 GJ</td><td class="rationale">REJECTED &#8212; excessive fuel penalty; benefit/cost drops to 3.03e+01 (same escape effectiveness assumed for any descent)</td></tr>
+<tr><td class="mono">FL330</td><td class="num">-2000 ft</td><td class="num">+8.97 kg</td><td class="num">+28.35 kg</td><td class="num">3961.02 GJ</td><td class="rationale">SELECTED &#8212; descent to FL330; +8.97 kg Jet-A; highest benefit/cost (3.63e+02)</td></tr>
+<tr><td class="mono">FL310</td><td class="num">-4000 ft</td><td class="num">+17.94 kg</td><td class="num">+56.69 kg</td><td class="num">3961.02 GJ</td><td class="rationale">REJECTED &#8212; excessive fuel penalty; benefit/cost drops to 1.82e+02 (same escape effectiveness assumed for any descent)</td></tr>
     </tbody>
   </table>
 
@@ -542,7 +542,7 @@
   </table>
 
   <footer>
-    STRATUM corridor report generated on 2026-10-20 17:38 UTC.
+    STRATUM corridor report generated on 2026-10-22 14:51 UTC.
     Source: ECMWF ERA5 4D Reanalysis (era5_del_bom_20250101.nc). Model: LightGBM with monotone constraints + isotonic calibration (train 26550 / val 49050 rows, 67516 NaN-masked labels). Status: [CLEAR] no SAC formation,
     [AERODYNAMIC] forms but calibrated P(persist) &#60; 0.50,
     [PERSISTENT] calibrated P(persist) &#8805; 0.50. Decisions activate at
