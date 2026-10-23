@@ -223,7 +223,14 @@ def test_train_writes_artifact_and_metrics(
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = train_cli.train(
-            ["--dataset", str(physics_dataset.labels), "--out", str(artifact)]
+            [
+                "--dataset",
+                str(physics_dataset.labels),
+                "--out",
+                str(artifact),
+                "--min-train-rows",
+                "40",
+            ]
         )
     assert code == 0, buffer.getvalue()
     assert artifact.is_file()
@@ -254,6 +261,34 @@ def test_train_writes_artifact_and_metrics(
         "n_val_labeled"
     ]
 
+    # The pre-validation rows split once more into an earliest fit slice and
+    # a latest calibration slice; neither is the validation block.
+    assert metrics["n_train_fit"] + metrics["n_calibration"] == metrics["n_train"]
+    assert metrics["n_train_fit"] > 0
+    assert metrics["n_calibration"] > 0
+    assert metrics["n_train_fit_labeled"] > 0
+    assert metrics["n_calibration_labeled"] > 0
+    assert (
+        metrics["n_calibration_positive"] + metrics["n_calibration_negative"]
+        == metrics["n_calibration_labeled"]
+    )
+    assert metrics["n_calibration_positive"] > 0
+    assert metrics["n_calibration_negative"] > 0
+    training = payload["training"]
+    assert training["calibration_fraction"] == pytest.approx(0.2)
+    assert training["n_train_fit"] == metrics["n_train_fit"]
+    assert training["n_calibration"] == metrics["n_calibration"]
+    assert training["n_train_fit_labeled"] == metrics["n_train_fit_labeled"]
+    assert training["n_calibration_labeled"] == metrics["n_calibration_labeled"]
+    assert training["n_calibration_positive"] == metrics["n_calibration_positive"]
+    assert training["n_calibration_negative"] == metrics["n_calibration_negative"]
+    assert pd.Timestamp(training["fit_end_utc"]) <= pd.Timestamp(
+        training["calibration_start_utc"]
+    )
+    assert pd.Timestamp(training["calibration_end_utc"]) < pd.Timestamp(
+        training["val_start_utc"]
+    )
+
     # The training envelope records the range the labeled training rows
     # cover: FL330/FL350/FL370, i.e. the ISA pressures of those levels.
     envelope = payload["training_envelope"]
@@ -268,6 +303,99 @@ def test_train_writes_artifact_and_metrics(
     assert metadata["training_envelope"] == envelope
     assert metadata["metrics"]["brier_calibrated"] == metrics["brier_calibrated"]
     assert "rhi PASS | tlm_k PASS" in buffer.getvalue()
+
+
+def test_train_rejects_single_class_calibration(
+    physics_dataset: PhysicsDataset, tmp_path: Path
+) -> None:
+    """A calibration slice with one outcome must not collapse the map."""
+    frame = pd.read_csv(physics_dataset.labels)
+    frame["label"] = 1.0
+    dataset = tmp_path / "one_class.csv"
+    frame.to_csv(dataset, index=False)
+
+    artifact = tmp_path / "model.joblib"
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        code = train_cli.train(
+            ["--dataset", str(dataset), "--out", str(artifact)]
+        )
+    assert code == 1
+    assert not artifact.exists()
+    assert "calibration slice holds only one label class" in stderr.getvalue()
+
+
+def test_train_single_time_step_uses_row_order_split(
+    physics_dataset: PhysicsDataset, tmp_path: Path
+) -> None:
+    """With no time order, split rows deterministically into three parts."""
+    frame = pd.read_csv(physics_dataset.labels)
+    frame["time"] = "2025-01-01T00:00:00"
+    dataset = tmp_path / "single_time_step.csv"
+    frame.to_csv(dataset, index=False)
+
+    artifact = tmp_path / "model.joblib"
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = train_cli.train(
+            ["--dataset", str(dataset), "--out", str(artifact)]
+        )
+    assert code == 0, buffer.getvalue()
+    assert artifact.is_file()
+
+    payload = json.loads(
+        artifact.with_suffix(".metrics.json").read_text(encoding="utf-8")
+    )
+    training = payload["training"]
+    metrics = payload["metrics"]
+    assert training["single_time_step"] is True
+    assert training["time_ordered_split"] is False
+    assert training["calibration_split"] == "row_order"
+    assert metrics["n_train"] + metrics["n_val"] == metrics["n_samples"]
+    assert metrics["n_train_fit"] + metrics["n_calibration"] == metrics["n_train"]
+    assert metrics["n_train_fit"] > 0
+    assert metrics["n_calibration"] > 0
+    assert metrics["n_train_fit_labeled"] > 0
+    assert metrics["n_calibration_labeled"] > 0
+
+
+def test_train_calibration_uses_pre_validation_time_steps(
+    physics_dataset: PhysicsDataset, tmp_path: Path
+) -> None:
+    """The calibrator sees the latest training steps, never the val block."""
+    frame = pd.read_csv(physics_dataset.labels)
+    step_times = [f"2025-01-01T{hour:02d}:00:00" for hour in range(0, 12, 2)]
+    frame["time"] = [
+        step_times[(position // 25) % len(step_times)]
+        for position in range(len(frame))
+    ]
+    dataset = tmp_path / "six_time_steps.csv"
+    frame.to_csv(dataset, index=False)
+
+    artifact = tmp_path / "model.joblib"
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = train_cli.train(
+            ["--dataset", str(dataset), "--out", str(artifact)]
+        )
+    assert code == 0, buffer.getvalue()
+
+    payload = json.loads(
+        artifact.with_suffix(".metrics.json").read_text(encoding="utf-8")
+    )
+    training = payload["training"]
+    metrics = payload["metrics"]
+    assert training["single_time_step"] is False
+    assert training["calibration_split"] == "time_steps"
+    assert metrics["n_train_fit"] + metrics["n_calibration"] == metrics["n_train"]
+    assert metrics["n_train_fit"] > 0
+    assert metrics["n_calibration"] > 0
+    assert pd.Timestamp(training["fit_end_utc"]) < pd.Timestamp(
+        training["calibration_start_utc"]
+    )
+    assert pd.Timestamp(training["calibration_end_utc"]) < pd.Timestamp(
+        training["val_start_utc"]
+    )
 
 
 def test_training_envelope_ignores_rows_without_pressure_provenance() -> None:
@@ -453,7 +581,14 @@ def test_validation_block_holds_later_times_than_training(
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = train_cli.train(
-            ["--dataset", str(physics_dataset.labels), "--out", str(artifact)]
+            [
+                "--dataset",
+                str(physics_dataset.labels),
+                "--out",
+                str(artifact),
+                "--min-train-rows",
+                "40",
+            ]
         )
     assert code == 0, buffer.getvalue()
     payload = json.loads(

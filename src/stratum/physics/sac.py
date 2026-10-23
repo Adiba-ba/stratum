@@ -28,6 +28,8 @@ Research, 107(D13).
 
 from __future__ import annotations
 
+import math
+
 from stratum.physics import thermo
 
 __all__ = [
@@ -139,16 +141,18 @@ def critical_T(rhw: float, TLM: float, G: float) -> float:
     The Schmidt-Appleman criterion holds for ambient temperatures below
     T_LC. For ``rhw >= 0.999`` the mixing line is tangent to the
     saturation curve at T_LM itself, so T_LM is returned (Schumann 1996,
-    p. 10).
+    p. 10). ``rhw == 0`` is allowed: the equation then reduces to the
+    straight line ``T_LC = TLM - e_w(TLM) / G``, which is well defined
+    for a physical mixing-line slope.
 
     Raises
     ------
     ValueError
-        If ``rhw`` is not positive, or if the root bracket fails because
-        ``TLM`` and ``G`` are inconsistent.
+        If ``rhw`` is negative or non-finite, or if the root bracket
+        fails because ``TLM`` and ``G`` are inconsistent.
     """
-    if rhw <= 0.0:
-        raise ValueError(f"rhw must be positive, got {rhw!r}")
+    if not math.isfinite(rhw) or rhw < 0.0:
+        raise ValueError(f"rhw must be non-negative and finite, got {rhw!r}")
     if rhw >= _RHW_TANGENT_LEVEL:
         return TLM
 

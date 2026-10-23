@@ -6,6 +6,8 @@ criterion at 250 hPa / eta = 0.30 and the ISA pressure conversion.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from stratum.physics import sac, thermo
@@ -67,6 +69,25 @@ def test_critical_t_bracket_failure_raises() -> None:
     assert "rhw=0.5" in message
     assert "TLM=231.0" in message
     assert "G=0.01" in message
+
+
+def test_evaluate_sac_zero_rhi_matches_linear_root() -> None:
+    """RHi = 0.0 solves the mixing-line equation without a special case."""
+    result = sac.evaluate_sac(P250_PA, 223.15, rhi=0.0, eta=ETA)
+    tlm_k = sac.solve_TLM(P250_PA, ETA)
+    expected_tlc_c = tlm_k - thermo.e_w(tlm_k) / sac.G(P250_PA, ETA) - 273.15
+
+    assert math.isfinite(result["TLC_C"])
+    assert result["TLC_C"] == pytest.approx(expected_tlc_c, abs=1e-9)
+    assert result["TLC_C"] < result["TLM_C"]
+    assert result["persists"] is False
+
+
+@pytest.mark.parametrize("rhw", [-0.1, float("nan"), float("inf")])
+def test_critical_t_rejects_negative_or_non_finite_rhw(rhw: float) -> None:
+    """Only non-negative, finite water relative humidities are accepted."""
+    with pytest.raises(ValueError, match="non-negative and finite"):
+        sac.critical_T(rhw=rhw, TLM=231.0, G=0.5)
 
 
 def test_evaluate_sac_raises_on_impossible_mixing_slope() -> None:

@@ -82,6 +82,8 @@ SEVIRI: `src/stratum/io/meteosat.py` defines the channels (`IR_108`, `IR_120`, `
 stratum fetch seviri --date 2025-01-01 --hour 20 --channels 108,120 --out data/cache/seviri
 ```
 
+The observed-label path is implemented but not end-to-end validated by the local cache. The cached SEVIRI granule is a 0-byte zip, and `data/cache/adsb_history_india.csv` holds 125 fixes whose barometric altitude tops out at 25,000 ft, so no cruise-level segment was available for satellite matching. No observed label has been produced; the shipped model uses ERA5 physics labels only.
+
 ## Open-Meteo forecast
 
 `stratum check-live` samples the Open-Meteo hourly pressure-level forecast along the built-in RJAA (Narita) to RJBB (Kansai) track. It needs no credentials, covers the default hour 03:00 UTC, and rejects other airport pairs until geometry is added.

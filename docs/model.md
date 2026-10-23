@@ -60,9 +60,11 @@ Observed labels (`src/stratum/labels/observed.py`) return `1.0` on a detection m
 
 ## Training protocol
 
-`stratum train` reads the CSV, orders rows by the `time` column, and takes the validation block as the last contiguous stretch of time steps that carries at least 50 labeled rows and at least 20 persistent ones. Training uses the rows strictly before that block, so no later row enters training and the split stays free of time leakage. Rows with `NaN` labels are masked from training and from scoring; they are never coerced to `0.0`. `--min-train-rows` (default `50`) guards against training on a nearly empty label set, `--min-val-positive` (default `20`) sets the persistent-row floor of the validation block, and `--val-fraction` (default `0.3`) is recorded in the artifact metadata.
+`stratum train` reads the CSV, orders rows by the `time` column, and takes the validation block as the last contiguous stretch of time steps that carries at least 50 labeled rows and at least 20 persistent ones. Rows with `NaN` labels are masked from training and from scoring; they are never coerced to `0.0`. `--min-train-rows` (default `50`) guards against training on a nearly empty label set, `--min-val-positive` (default `20`) sets the persistent-row floor of the validation block, and `--val-fraction` (default `0.3`) is recorded in the artifact metadata.
 
-The block rule replaces a blind time-ordered tail. Contrail formation is synoptic: a cold spell leaves whole days without a single persistent row, and the last 106 time steps of this week carry none at all. A tail split over the final 30% of the rows would therefore have produced a validation set with no positive example to score, and the Brier number would have described an empty class. Walking backwards from the last time step until the block holds enough labeled and persistent rows keeps the split scorable. On the shipped dataset the block starts at 2025-01-03T11:00Z and covers 109 of the 168 time steps; the remaining 59 steps are the training rows. When no trailing block qualifies, the command exits 1 and names the two counts it needs.
+The rows before the validation block are split again by time. The earliest steps fit the base LightGBM model; the latest `--calibration-fraction` (default `0.2`) of those steps fit the isotonic calibrator. On the shipped dataset the fit slice covers 2025-01-01T00:00Z..2025-01-02T22:00Z (21,150 rows, 5,727 labels), the calibration slice covers 2025-01-02T23:00Z..2025-01-03T10:00Z (5,400 rows, 1,154 labels: 582 persistent, 572 subsaturated), and the validation block starts at 2025-01-03T11:00Z (49,050 rows, 1,203 labels). No validation row enters either fit or calibration.
+
+The block rule replaces a blind time-ordered tail. Contrail formation is synoptic: a cold spell leaves whole days without a single persistent row, and the last 106 time steps of this week carry none at all. A tail split over the final 30% of the rows would therefore have produced a validation set with no positive example to score, and the Brier number would have described an empty class. Walking backwards from the last time step until the block holds enough labeled and persistent rows keeps the split scorable. The calibration slice grows backwards the same way when its last steps are unobservable or contain only one outcome; a single-class slice would collapse every isotonic output to that class, so the command exits 1 rather than writing a degenerate calibrator. When no trailing validation block qualifies, it also exits 1 and names the two counts it needs.
 
 LightGBM parameters are fixed in `_MODEL_PARAMS`:
 
@@ -77,7 +79,7 @@ random_state = 42
 verbosity = -1
 ```
 
-`fit_calibrator` fits `sklearn.isotonic.IsotonicRegression` on the validation probabilities. Isotonic regression is monotonically non-decreasing, so the base model's monotone constraints survive calibration. The CLI fits the calibrator on the validation split and then scores the calibrated model on that same split, so the calibrated Brier number below is in-sample for the calibration step. `save_model` writes one joblib payload with `format_version = 1`, the model, and metadata: dataset path, SHA-256 and size, `feature_names`, metrics, and the training summary. `load_model` returns `(CalibratedModel, metadata)`.
+`fit_calibrator` fits `sklearn.isotonic.IsotonicRegression` on the held-out calibration slice, using the base model's raw probabilities. Isotonic regression is monotonically non-decreasing, so the base model's monotone constraints survive calibration. The calibrated Brier number below is measured on the untouched validation block, not on the rows used to fit the map. `save_model` writes one joblib payload with `format_version = 1`, the model, and metadata: dataset path, SHA-256 and size, `feature_names`, metrics, and the training summary. `load_model` returns `(CalibratedModel, metadata)`.
 
 ## Shipped artifact
 
@@ -87,13 +89,16 @@ verbosity = -1
 | --- | --- |
 | Samples | 75600 |
 | Training rows | 26550 |
-| Labeled training rows | 6881 |
+| Fit rows | 21150 |
+| Labeled fit rows | 5727 |
+| Calibration rows | 5400 |
+| Labeled calibration rows | 1154 (582 persistent, 572 subsaturated) |
 | Validation rows | 49050 |
 | Labeled validation rows | 1203 |
 | Persistent validation rows | 24 |
 | Subsaturated validation rows | 1179 |
 | Masked (NaN) rows | 67516 |
-| Brier score, raw | 2.4100414095124528e-14 |
+| Brier score, raw | 1.9849174626038537e-14 |
 | Brier score, calibrated | 0.0 |
 | Mean calibrated probability, persistent rows | 1.0 |
 | Mean calibrated probability, subsaturated rows | 0.0 |
@@ -104,7 +109,7 @@ verbosity = -1
 
 The class-wise means say what the Brier score leaves implicit: the calibrated probability is saturated at 1.0 on the persistent rows and 0.0 on the subsaturated ones. A Brier near zero on a rare event needs that context, because a model that simply never fires scores 0.0 against a block that holds no positive row at all.
 
-These numbers describe a physics surrogate, not contrail skill. Every label comes from the Schmidt-Appleman rule applied to ERA5, and the feature vector contains that rule's own inputs, so a monotone model can reproduce the decision boundary on held-out time. Nothing in the dataset comes from an observed contrail. The older single-day artifact `models/era5-physics-2025-01-01.metrics.json` is still on disk next to it, trained on `data/labels_physics_2025-01-01.csv`: 7,200 samples, 5,040 training rows (1,273 labeled), 2,160 validation rows (579 labeled), Brier 0.0034539009366374744 raw and 0.0017271157167530224 calibrated.
+These numbers describe a physics surrogate, not contrail skill. Every label comes from the Schmidt-Appleman rule applied to ERA5, and the feature vector contains that rule's own inputs, so a monotone model can reproduce the decision boundary on held-out time. Nothing in the dataset comes from an observed contrail. The older single-day artifact `models/era5-physics-2025-01-01.metrics.json` is still on disk next to it, trained on `data/labels_physics_2025-01-01.csv`: 7,200 samples, 4,800 training rows (3,900 fit, 900 calibration), 2,400 validation rows (642 labeled; 177 persistent, 465 subsaturated), Brier 0.002358424631532962 raw and 0.0017539137087965568 calibrated.
 
 ## Input envelope
 
@@ -129,8 +134,9 @@ The 0.40 gate is the activation threshold; the 0.50 count is a reporting statist
 - Seven ERA5 days over the Indian domain produced the shipped dataset. The model hasn't seen another season, another region, or another year.
 - Only 8,084 of 75,600 rows carry labels. The other 67,516 are censored, every one of them because the Schmidt-Appleman criterion doesn't hold there.
 - The near-zero Brier score reflects a physics surrogate that reproduces the Schmidt-Appleman rule on held-out time. It isn't skill against observed contrails.
-- The calibrated Brier score is in-sample for the isotonic map. A held-out calibration split would give a fairer number.
-- The validation block holds 24 persistent rows. The positive side of every class-wise number rests on those rows alone.
+- The validation block holds 24 persistent rows. The positive side of every class-wise number rests on those rows alone, even though the isotonic map itself is fitted on a separate 1,154-label calibration slice.
+- The calibration slice contains both classes (582 persistent vs 572 subsaturated), but it covers only 12 of the 59 pre-validation time steps.
 - Isotonic calibration is piecewise constant, so probabilities saturate in ranges with few labeled points.
 - The monotone checks in the metrics file cover `rhi` and `tlm_k` only; the other three constrained features are enforced by LightGBM but not re-verified per training run.
 - Feature defaults (`richardson_number = 1.0`, `solar_zenith_deg = 100.0`) apply when a diagnostic can't be computed; those rows are still trainable, which softens the affected constraint.
+- The observed-label path hasn't produced cruise-level labels end to end: the cached SEVIRI granule is a 0-byte zip and the cached India ADS-B track tops out at 25,000 ft. The shipped model is trained only on ERA5 physics labels.

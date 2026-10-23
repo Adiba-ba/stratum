@@ -61,17 +61,18 @@ stratum corridor \
   --route VIDP-VABB --flight-level 350 \
   --departure 2025-01-01T20:00:00 \
   --model models/era5-physics-2025-01-01_07d.joblib \
-  --out reports/vidp_vabb_2025-01-01.html
+  --out reports/vidp_vabb_2025-01-01.html \
+  --json reports/vidp_vabb_2025-01-01.json
 ```
 
 Flight state: 25 waypoints, 0 out-of-domain segments, 11 SAC-forming segments, 6 segments with calibrated `P(persist) >= 0.50`, 6 flagged segments with `P(persist) >= 0.40`. The 6 flagged segments form one contiguous reroute event.
 
-Event record: `segment_index` 3, time 2025-01-01T20:18:00+00:00, `p_persist` 1.0, `segments_in_event` 6, recommendation `descent` from FL350 to FL330, `segment_length_km` 47.42603553240151 (47426.0355 m).
+Event record: `segment_index` 3, time 2025-01-01T20:18:00+00:00, `p_persist` 1.0, `segments_in_event` 6, recommendation `descent` from FL350 to FL330, `event_length_km` 284.5562131944087 (284556.2132 m). The representative segment is 47.42603553240151 km long; the event length is the sum of all six flagged segments.
 
-Avoided forcing:
+Avoided forcing, using the length-weighted event probability and the representative candidate's 0.80 descent effectiveness:
 
 ```
-1.0 * 0.80 * 1.74e7 J/m * 47426.0355 m = 660170414611.029 J (660.17 GJ)
+1.0 * 0.80 * 1.74e7 J/m * 284556.2132 m = 3961022487666.169 J (3961.02 GJ)
 ```
 
 Cost, A320 at 0.65 kg/s over a 20-minute window:
@@ -85,12 +86,12 @@ CO2         = 8.97 * 3.16 = 28.3452 kg
 Benefit-to-cost comparison, 20-year horizon:
 
 ```
-avoided flux = 660170414611.029 / 5.10072e14 = 1.2943e-3 J/m^2
-CO2 flux     = 28.3452 * 2.39e-14 * 3.15576e7 = 2.1378e-5 J/m^2
-ratio        = 60.540106412958814
+avoided flux = 3961022487666.169 / 5.10072e14 = 7.7656e-3 J/m^2
+CO2 flux     = 28.3452 * 2.39e-14 * 3.15576e7 = 2.1379e-5 J/m^2
+ratio        = 363.24063847775244
 ```
 
-Reported totals: `total_extra_fuel_kg` 8.97, `total_extra_co2_kg` 28.3452, `total_avoidable_warming_j` 660170414611.029. Grouping the six flagged segments into one event prevents counting the same contrail six times.
+Reported totals: `total_extra_fuel_kg` 8.97, `total_extra_co2_kg` 28.3452, `total_avoidable_warming_j` 3961022487666.169. The event aggregation covers every flagged segment instead of counting only the representative segment, while the fuel and CO2 penalty remains one maneuver for the event.
 
 ## Vertical profile decision
 
@@ -103,7 +104,7 @@ stratum profile \
   --route VIDP-VABB --levels 290,310,330,350,370,390
 ```
 
-For that run: 25 waypoints, recommended FL330 at 6 waypoints and FL350 at 19 waypoints, `+53.82 kg` fuel and `+170.07 kg` CO2 against the FL350 baseline over a 20-minute window per waypoint. FL290 and FL310 sit outside the training envelope at every waypoint and are never recommended. The six FL330 waypoints are the waypoints where FL350 carried a high band, matching the six flagged segments of the corridor run.
+For that run: 25 waypoints, recommended FL350 at all 25, `+0.00 kg` fuel and `+0.00 kg` CO2 against the FL350 baseline over a 20-minute window per waypoint. At the 00:00 UTC departure every sampled level is subsaturated, so every combined risk is 0.0 and the tie stays at the baseline. FL290, FL310 and FL390 sit outside the training envelope at every waypoint and are never recommended. The corridor run departs at 20:00 UTC and does find six high-risk segments, which is why its advisory is non-empty while this profile run is not.
 
 ## Engineering defaults and their limits
 

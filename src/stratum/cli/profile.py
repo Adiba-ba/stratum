@@ -86,6 +86,7 @@ from stratum.decide.counterfactual import (
 from stratum.decide.fuel import estimate_fuel_penalty
 from stratum.io.era5 import load_era5_dataset
 from stratum.model.artifacts import load_model
+from stratum.model.envelope import pressure_envelope_bounds
 from stratum.model.features import FEATURE_NAMES
 from stratum.physics.thermo import FT_TO_M, fl_to_p
 from stratum.pipeline.build_features import (
@@ -136,18 +137,11 @@ def _envelope_bounds(envelope: Any) -> tuple[float, float] | None:
     The envelope is the ``training_envelope`` mapping written by
     ``stratum train``. ``None`` is returned when it is missing, malformed,
     non-finite or inverted, so a hand-edited artifact degrades to "range
-    unknown" instead of breaking the command.
+    unknown" instead of breaking the command. This is a thin wrapper around
+    :func:`stratum.model.envelope.pressure_envelope_bounds`, shared with the
+    corridor command.
     """
-    if not isinstance(envelope, Mapping):
-        return None
-    try:
-        low = float(envelope["pressure_pa_min"])
-        high = float(envelope["pressure_pa_max"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if not (math.isfinite(low) and math.isfinite(high)) or low > high:
-        return None
-    return low, high
+    return pressure_envelope_bounds(envelope)
 
 
 def _within_envelope(

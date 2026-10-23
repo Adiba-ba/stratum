@@ -45,16 +45,38 @@ semantic versioning.
   on a rare event is read next to the two class means.
 - `--min-val-positive` on `stratum train` to set the persistent-row floor of
   the validation block.
+- `--calibration-fraction` on `stratum train` to reserve a time-ordered,
+  held-out slice for the isotonic calibrator (default `0.2`).
+- GitHub Actions CI on push and pull request: install, full pytest suite, and
+  `stratum verify-baseline` on Python 3.11.
 - Documentation set: README and `docs/architecture.md`, `docs/physics.md`,
   `docs/model.md`, `docs/data.md`, `docs/decisions.md`, `docs/backlog.md`, and
   this changelog.
 - Real evidence: ERA5 physics labels, corridor HTML/JSON, vertical profile JSON,
   the seven-day training metrics JSON, and the GOES-16 scene detection with
   preview image.
-- Tests expanded from 120 to 271 collected cases.
+- Tests expanded from 120 to 288 collected cases.
 
 ### Fixed
 
+- Corridor decisions now require both a positive SAC result and a calibrated
+  probability above the threshold. A high model score on a non-forming segment
+  no longer creates a false advisory.
+- Multi-segment contrail events now use the total event length and a
+  length-weighted persistence probability, so avoided forcing covers every
+  flagged segment and the benefit-to-cost ratio is recomputed from the event
+  total.
+- Corridor candidate levels are checked against the model's `training_envelope`;
+  FL390 is no longer recommended from an FL370 baseline when training stopped at
+  FL370.
+- Isotonic calibration is fitted on a held-out, time-ordered calibration slice
+  instead of the validation block used to report Brier scores. The split grows
+  backwards until both label classes are present and rejects a single-class
+  calibration slice rather than writing a degenerate map.
+- `--max-block-steps` is enforced, and a single-time-step dataset truly uses a
+  row-order split instead of an empty training set.
+- `critical_T` accepts `rhw == 0.0`, so `evaluate_route_profile` no longer
+  crashes on an RHi=0 input. Negative and non-finite values are still rejected.
 - `tlm_k` monotone constraint sign flipped to +1. Risk rises with the
   mixing-line temperature.
 - CO2 side of the benefit-to-cost ratio moved to J/m^2 with cited AR6 AGWP
@@ -103,6 +125,12 @@ semantic versioning.
 - The model artifact of record is now `models/era5-physics-2025-01-01_07d.joblib`,
   trained on `data/labels_physics_2025-01-01_07d.csv`. The corridor and vertical
   profile reports were regenerated with it.
+- Training is now a three-way time-ordered split: 21,150 fit rows (5,727
+  labels), a 5,400-row held-out calibration slice (1,154 labels), and 49,050
+  untouched validation rows (1,203 labels) on the seven-day dataset. The
+  corridor report now covers a 284.56 km event with 3,961.02 GJ avoided forcing;
+  the 00:00 UTC profile run is all-subsaturated and recommends FL350 at all 25
+  waypoints.
 
 ### Removed
 

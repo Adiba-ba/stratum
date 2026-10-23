@@ -1,10 +1,13 @@
 """Isotonic probability calibration for the STRATUM correction model.
 
 Wraps a fitted binary classifier together with an isotonic regression map
-fitted on validation predictions, so the calibrated output is a true
-probability in ``[0.0, 1.0]``. Isotonic regression is monotonically
-non-decreasing, therefore the physical monotone constraints of the base
-model are preserved by calibration.
+fitted on held-out calibration predictions, so the calibrated output is a
+true probability in ``[0.0, 1.0]``. The calibration rows must not be used
+to fit the base classifier, and the validation rows must not be used to fit
+either the classifier or the calibrator, otherwise the reported calibrated
+scores are in-sample. Isotonic regression is monotonically non-decreasing,
+therefore the physical monotone constraints of the base model are preserved
+by calibration.
 """
 
 from __future__ import annotations
@@ -79,19 +82,22 @@ class CalibratedModel:
 
 def fit_calibrator(
     model: PredictProbaModel,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
+    X_calibration: np.ndarray,
+    y_calibration: np.ndarray,
 ) -> CalibratedModel:
-    """Fit isotonic calibration on non-NaN validation rows.
+    """Fit isotonic calibration on non-NaN calibration rows.
+
+    The rows passed here must be held out from the base-model fit and must
+    not be the validation block used to report metrics.
 
     Parameters
     ----------
     model : PredictProbaModel
         Fitted base classifier.
-    X_val : np.ndarray
-        Validation features, shape ``(n_samples, n_features)``.
-    y_val : np.ndarray
-        Validation labels; NaN rows (unobservable scenes) are excluded
+    X_calibration : np.ndarray
+        Calibration features, shape ``(n_samples, n_features)``.
+    y_calibration : np.ndarray
+        Calibration labels; NaN rows (unobservable scenes) are excluded
         from the isotonic fit.
 
     Returns
@@ -100,16 +106,16 @@ def fit_calibrator(
         Wrapper whose ``predict_proba`` returns calibrated probabilities
         clipped to ``[0.0, 1.0]``.
     """
-    features = np.asarray(X_val, dtype=float)
-    labels = np.asarray(y_val, dtype=float)
+    features = np.asarray(X_calibration, dtype=float)
+    labels = np.asarray(y_calibration, dtype=float)
     if features.ndim != 2 or labels.shape != (features.shape[0],):
         raise ValueError(
-            "X_val and y_val shapes do not line up: "
+            "X_calibration and y_calibration shapes do not line up: "
             f"{features.shape!r} and {labels.shape!r}"
         )
     valid = ~np.isnan(labels)
     if not valid.any():
-        raise ValueError("all validation labels are NaN; nothing to calibrate on")
+        raise ValueError("all calibration labels are NaN; nothing to calibrate on")
 
     raw = np.asarray(model.predict_proba(features[valid]), dtype=float)[:, 1]
     calibrator = IsotonicRegression(

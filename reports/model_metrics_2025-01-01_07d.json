@@ -25,12 +25,18 @@
   ],
   "metrics": {
     "brier_calibrated": 0.0,
-    "brier_raw": 2.4100414095124528e-14,
+    "brier_raw": 1.9849174626038537e-14,
     "mean_probability_negative": 0.0,
     "mean_probability_positive": 1.0,
+    "n_calibration": 5400,
+    "n_calibration_labeled": 1154,
+    "n_calibration_negative": 572,
+    "n_calibration_positive": 582,
     "n_masked": 67516,
     "n_samples": 75600,
     "n_train": 26550,
+    "n_train_fit": 21150,
+    "n_train_fit_labeled": 5727,
     "n_train_labeled": 6881,
     "n_val": 49050,
     "n_val_labeled": 1203,
@@ -38,24 +44,38 @@
     "n_val_positive": 24
   },
   "provenance": {
-    "dataset_mtime_utc": "2026-10-20T17:15:48.763040+00:00",
+    "dataset_mtime_utc": "2026-10-20T17:15:48+00:00",
     "dataset_path": "data/labels_physics_2025-01-01_07d.csv",
     "dataset_sha256": "8b557eee4f7b965da482419418a279f77b4d4eceffae312f0838626580c59963",
     "dataset_size_bytes": 25927708
   },
   "training": {
+    "calibration_end_utc": "2025-01-03T10:00:00+00:00",
+    "calibration_fraction": 0.2,
+    "calibration_split": "time_steps",
+    "calibration_start_utc": "2025-01-02T23:00:00+00:00",
+    "fit_end_utc": "2025-01-02T22:00:00+00:00",
+    "fit_start_utc": "2025-01-01T00:00:00+00:00",
     "min_train_rows": 50,
     "monotone_checks": {
       "rhi": true,
       "tlm_k": true
     },
+    "n_calibration": 5400,
+    "n_calibration_labeled": 1154,
+    "n_calibration_negative": 572,
+    "n_calibration_positive": 582,
     "n_masked": 67516,
     "n_samples": 75600,
     "n_train": 26550,
+    "n_train_fit": 21150,
+    "n_train_fit_labeled": 5727,
     "n_val": 49050,
     "single_time_step": false,
     "time_ordered_split": true,
-    "val_fraction": 0.3
+    "val_end_utc": "2025-01-07T23:00:00+00:00",
+    "val_fraction": 0.3,
+    "val_start_utc": "2025-01-03T11:00:00+00:00"
   },
   "training_envelope": {
     "flight_levels": [

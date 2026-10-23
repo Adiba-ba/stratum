@@ -15,6 +15,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from stratum.decide.climate import calculate_net_climate_benefit
+from stratum.decide.counterfactual import MEDIAN_PERSISTENT_EF_J_PER_M
 from stratum.model.calibrate import CalibratedModel, fit_calibrator
 from stratum.model.features import FEATURE_NAMES
 from stratum.model.train import train_contrail_model
@@ -426,6 +428,94 @@ def test_runner_dry_corridor_produces_no_advisories() -> None:
     assert result["recommended_reroutes"] == []
     assert result["total_avoidable_warming_j"] == 0.0
     assert all(segment["decision_status"] is None for segment in result["segments"])
+
+
+def test_runner_ignores_high_probability_without_sac() -> None:
+    """A high P(persist) on a non-forming segment is meaningless."""
+    result = evaluate_corridor_flight(
+        _trajectory(),
+        _mock_met(target_rhi=0.2, temperature_offset=10.0),
+        _FixedProbabilityModel(0.9),
+    )
+
+    assert result["contrail_forming_segments"] == 0
+    assert result["contrail_persistent_segments"] == 0
+    assert result["flagged_segments"] == 0
+    assert result["recommended_reroutes"] == []
+    assert result["total_avoidable_warming_j"] == 0.0
+    assert all(segment["decision_status"] is None for segment in result["segments"])
+    # The audit keeps the raw probability and SAC flag instead of erasing
+    # them: only their interpretation is gated.
+    assert all(segment["sac_forms"] is False for segment in result["segments"])
+    assert all(
+        segment["p_persist"] == pytest.approx(0.9)
+        for segment in result["segments"]
+    )
+
+
+def test_runner_aggregates_one_event_across_all_flagged_segments() -> None:
+    result = evaluate_corridor_flight(
+        _trajectory(), _mock_met(target_rhi=1.3), _FixedProbabilityModel(0.9)
+    )
+
+    assert result["flagged_segments"] == _NUM_POINTS
+    assert len(result["recommended_reroutes"]) == 1
+    reroute = result["recommended_reroutes"][0]
+    segment_lengths = [
+        float(segment["segment_length_km"]) for segment in result["segments"]
+    ]
+    event_length_km = sum(segment_lengths)
+
+    assert reroute["segments_in_event"] == _NUM_POINTS
+    assert reroute["segment_index"] == reroute["representative_segment_index"]
+    assert reroute["representative_p_persist"] == pytest.approx(0.9)
+    assert reroute["representative_segment_length_km"] == pytest.approx(
+        segment_lengths[reroute["representative_segment_index"]]
+    )
+    assert reroute["event_length_km"] == pytest.approx(
+        event_length_km, rel=1e-12
+    )
+    assert reroute["segment_length_km"] == pytest.approx(
+        event_length_km, rel=1e-12
+    )
+    assert reroute["p_persist"] == pytest.approx(0.9, rel=1e-12)
+
+    effectiveness = 0.85 if reroute["direction"] == "climb" else 0.80
+    expected_avoided_ef_j = (
+        0.9
+        * effectiveness
+        * MEDIAN_PERSISTENT_EF_J_PER_M
+        * event_length_km
+        * 1000.0
+    )
+    assert reroute["avoided_contrail_ef_j"] == pytest.approx(
+        expected_avoided_ef_j, rel=1e-9
+    )
+    expected_benefit = calculate_net_climate_benefit(
+        expected_avoided_ef_j, reroute["delta_co2_kg"]
+    )
+    assert reroute["benefit_to_cost_ratio"] == pytest.approx(
+        expected_benefit["benefit_to_cost_ratio"], rel=1e-9
+    )
+    assert reroute["delta_co2_kg"] == pytest.approx(
+        reroute["delta_fuel_kg"] * 3.16
+    )
+
+
+def test_runner_enforces_training_envelope_from_fl370() -> None:
+    result = evaluate_corridor_flight(
+        _trajectory(fl=370.0),
+        _mock_met(target_rhi=1.3),
+        _FixedProbabilityModel(0.9),
+        pressure_envelope=(21663.0, 26201.0),
+    )
+
+    assert result["recommended_reroutes"], result["segments"]
+    for reroute in result["recommended_reroutes"]:
+        assert reroute["baseline_fl"] == pytest.approx(370.0)
+        assert reroute["direction"] == "descent"
+        assert reroute["recommended_fl"] == pytest.approx(350.0)
+        assert reroute["recommended_fl"] != pytest.approx(390.0)
 
 
 def _trajectory_with_out_of_domain_dip(
